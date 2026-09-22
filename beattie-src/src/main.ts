@@ -1,5 +1,6 @@
 import './style.css';
-import { allTests, getTestById, part3Intro, starNotes, footerCopyright } from './data';
+import { allTests, getTestById, homeCopy, starNotes, footerCopyright } from './data';
+import { readingFor } from './data/insights';
 import type { QuizTest, ArchiveEntry } from './data/types';
 import { scoreLikert, scoreMcq, scoreTf, computeTotal, starsLabel } from './lib/scoring';
 import {
@@ -10,6 +11,7 @@ import {
   loadDraft,
   clearDraft,
 } from './lib/storage';
+import { renderArchiveCard, renderResultBody } from './ui/result';
 
 type Step = 'warning' | 'assessment' | 'mcq' | 'tf' | 'result';
 
@@ -53,22 +55,30 @@ function renderHome() {
   const cards = allTests
     .map((t) => {
       const done = archive.find((a) => a.testId === t.id);
+      const blurb = readingFor(t.id)?.blurb ?? '';
       return `<a class="test-card" href="#/test/${t.id}">
         <div class="ch">第 ${t.chapter} 章</div>
         <h3>${t.title}</h3>
-        <div class="meta">一评估 ${t.likertItems.length} · 二选择题 ${t.mcqItems.length} · 三判断题 ${t.tfItems.length}</div>
-        ${t.warning ? '<span class="badge warn">开始前有悲痛提醒</span>' : ''}
-        ${done ? `<span class="badge">最近总分 ${done.total}</span>` : ''}
+        <p class="blurb">${blurb}</p>
+        <div class="meta">评估 ${t.likertItems.length} · 选择 ${t.mcqItems.length} · 判断 ${t.tfItems.length}</div>
+        ${t.warning ? '<span class="badge warn">开始前先读悲痛提醒</span>' : ''}
+        ${done ? `<span class="badge">最近 ${done.total}</span>` : ''}
       </a>`;
     })
+    .join('');
+
+  const introCards = homeCopy.cards
+    .map((c) => `<article class="intro-card"><h2>${c.title}</h2><p>${c.text}</p></article>`)
     .join('');
 
   app.innerHTML = `<div class="shell">
     ${topbar()}
     <section class="hero">
-      <h1>情绪健康测试集</h1>
-      <p>${part3Intro}</p>
-      <p>请注意在这些测试中：</p>
+      <p class="kicker">${homeCopy.kicker}</p>
+      <h1>${homeCopy.title}</h1>
+      <p class="lead">${homeCopy.lead}</p>
+      <div class="intro-grid">${introCards}</div>
+      <p class="star-label">星号</p>
       <ul class="star-list">
         ${starNotes
           .map((s) => `<li><span class="mark">${s.label}</span><span>${s.text}</span></li>`)
@@ -83,25 +93,19 @@ function renderHome() {
 
 function renderArchive() {
   const list = loadArchive();
+  const empty = `<div class="empty-card">
+      <strong>还没有记录</strong>
+      <p>做完任何一套，结果会留在这台浏览器里。</p>
+      <button class="btn primary" data-nav="home">去看六套测试</button>
+    </div>`;
   app.innerHTML = `<div class="shell">
-    ${topbar('<button class="btn ghost" data-nav="home">返回首页</button>')}
-    <section class="card">
-      <h1>情绪档案</h1>
-      <p>本地保存在本浏览器的 localStorage，不会上传。</p>
-      ${
-        list.length === 0
-          ? '<p class="empty">还没有完成的测试记录。</p>'
-          : list
-              .map(
-                (e) => `<div class="archive-item">
-            <strong>${e.title}</strong>
-            <div class="when">${new Date(e.completedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}（上海时区）</div>
-            <div>评估 ${e.sectionScores.assessment} · 选择 ${e.sectionScores.mcq} · 判断 ${e.sectionScores.tf} · <b>总分 ${e.total}</b></div>
-            <p>${e.bandText.slice(0, 120)}${e.bandText.length > 120 ? '…' : ''}</p>
-          </div>`,
-              )
-              .join('')
-      }
+    ${topbar('<button class="btn ghost" data-nav="home">回首页</button>')}
+    <section class="archive-page">
+      <header class="archive-head">
+        <h1>情绪档案</h1>
+        <p>只留在这台浏览器里，不会上传。</p>
+      </header>
+      ${list.length === 0 ? empty : `<div class="archive-list">${list.map((e) => renderArchiveCard(e)).join('')}</div>`}
       ${list.length ? '<button class="btn danger" data-clear>清空档案</button>' : ''}
     </section>
   </div>${footerHtml()}`;
@@ -127,13 +131,28 @@ function emptyDraft(test: QuizTest): DraftState {
   };
 }
 
+function stepOrder(test: QuizTest): { id: Step; label: string }[] {
+  const steps: { id: Step; label: string }[] = [];
+  if (test.warning) steps.push({ id: 'warning', label: '提醒' });
+  steps.push(
+    { id: 'assessment', label: '评估' },
+    { id: 'mcq', label: '选择' },
+    { id: 'tf', label: '判断' },
+    { id: 'result', label: '结果' },
+  );
+  return steps;
+}
+
 function progressPct(step: Step, test: QuizTest): number {
-  const hasWarn = !!test.warning;
-  const order: Step[] = hasWarn
-    ? ['warning', 'assessment', 'mcq', 'tf', 'result']
-    : ['assessment', 'mcq', 'tf', 'result'];
-  const i = order.indexOf(step);
+  const order = stepOrder(test);
+  const i = Math.max(0, order.findIndex((s) => s.id === step));
   return Math.round(((i + 1) / order.length) * 100);
+}
+
+function stepsHtml(step: Step, test: QuizTest): string {
+  return `<ol class="steps">${stepOrder(test)
+    .map((s) => `<li class="${s.id === step ? 'on' : ''}">${s.label}</li>`)
+    .join('')}</ol>`;
 }
 
 function renderTest(test: QuizTest) {
@@ -148,12 +167,17 @@ function renderTest(test: QuizTest) {
     let body = '';
 
     if (draft.step === 'warning' && test.warning) {
+      const paragraphs = test.warning
+        .split(/\n\n+/)
+        .map((p) => `<p>${p}</p>`)
+        .join('');
       body = `<section class="card">
+        <p class="kicker">开始前</p>
         <h1>${test.title}</h1>
-        <div class="warning-box">${test.warning}</div>
+        <div class="warning-box">${paragraphs}</div>
         <div class="sticky-bar">
           <button class="btn ghost" data-back>返回</button>
-          <button class="btn primary" data-accept>我已阅读，开始测试</button>
+          <button class="btn primary" data-accept>读过了，开始</button>
         </div>
       </section>`;
     } else if (draft.step === 'assessment') {
@@ -187,7 +211,7 @@ function renderTest(test: QuizTest) {
           .join('')}
         <div class="sticky-bar">
           <button class="btn ghost" data-back>${test.warning ? '上一步' : '返回'}</button>
-          <button class="btn primary" data-next>进入选择题</button>
+          <button class="btn primary" data-next>下一节：选择</button>
         </div>
       </section>`;
     } else if (draft.step === 'mcq') {
@@ -220,7 +244,7 @@ function renderTest(test: QuizTest) {
           .join('')}
         <div class="sticky-bar">
           <button class="btn ghost" data-prev>上一节</button>
-          <button class="btn primary" data-next>进入判断题</button>
+          <button class="btn primary" data-next>下一节：判断</button>
         </div>
       </section>`;
     } else if (draft.step === 'tf') {
@@ -256,7 +280,7 @@ function renderTest(test: QuizTest) {
           .join('')}
         <div class="sticky-bar">
           <button class="btn ghost" data-prev>上一节</button>
-          <button class="btn primary" data-finish>查看总分与解读</button>
+          <button class="btn primary" data-finish>看结果</button>
         </div>
       </section>`;
     } else if (draft.step === 'result') {
@@ -264,26 +288,18 @@ function renderTest(test: QuizTest) {
       const m = scoreMcq(test.mcqItems, draft.mcq);
       const t = scoreTf(test.tfItems, draft.tf);
       const { total, band } = computeTotal(test, { assessment: a, mcq: m, tf: t });
-      body = `<section class="card">
-        <h1>${test.title} · 结果</h1>
-        <div class="result-score">${total}</div>
-        <p>满分 ${test.maxPossible}</p>
-        <div class="score-grid">
-          <div><strong>${a}</strong><span>一、评估</span></div>
-          <div><strong>${m}</strong><span>二、选择题</span></div>
-          <div><strong>${t}</strong><span>三、判断题</span></div>
-        </div>
-        <h2 class="section-title">${band ? `${band.min}～${band.max}` : '解读'}</h2>
-        <p style="white-space:pre-wrap">${band?.text ?? '未匹配到分数段，请检查作答。'}</p>
-        <div class="sticky-bar">
-          <button class="btn ghost" data-retry>重做</button>
-          <button class="btn primary" data-home>返回首页</button>
-        </div>
-      </section>`;
+      body = renderResultBody({
+        test,
+        sections: { assessment: a, mcq: m, tf: t },
+        total,
+        bandText: band?.text ?? '',
+        bandRange: band ? `${band.min}–${band.max}` : '',
+      });
     }
 
     app.innerHTML = `<div class="shell">
       ${topbar('<button class="btn ghost" data-nav="home">首页</button>')}
+      ${stepsHtml(draft.step, test)}
       <div class="progress" aria-hidden="true"><span style="width:${pct}%"></span></div>
       ${body}
     </div>${footerHtml()}`;
@@ -337,13 +353,13 @@ function renderTest(test: QuizTest) {
     app.querySelector('[data-next]')?.addEventListener('click', () => {
       if (draft.step === 'assessment') {
         if (draft.likert.some((v) => v === null)) {
-          alert('请先为评估部分每一题打分（0–10）。');
+          alert('评估部分还有题没打分。');
           return;
         }
         draft.step = 'mcq';
       } else if (draft.step === 'mcq') {
         if (draft.mcq.some((v) => v === null)) {
-          alert('请完成全部选择题（或选择“不符合我的情况”）。');
+          alert('选择题还有空着的。');
           return;
         }
         draft.step = 'tf';
@@ -388,7 +404,7 @@ function renderTest(test: QuizTest) {
 
     app.querySelector('[data-finish]')?.addEventListener('click', () => {
       if (draft.tf.some((v) => v === null)) {
-        alert('请完成全部判断题。');
+        alert('判断题还有空着的。');
         return;
       }
       const a = scoreLikert(draft.likert);
@@ -419,6 +435,10 @@ function renderTest(test: QuizTest) {
     app.querySelector('[data-home]')?.addEventListener('click', () => {
       clearDraft(test.id);
       go('');
+    });
+
+    app.querySelector('[data-archive]')?.addEventListener('click', () => {
+      go('archive');
     });
   }
 
