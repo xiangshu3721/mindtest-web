@@ -1,0 +1,8 @@
+{
+  "name": "ecr",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test ecr/js/score.test.mjs"
+  }
+}
