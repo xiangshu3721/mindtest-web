@@ -43,7 +43,7 @@ function footerHtml() {
 
 function topbar(extra = '') {
   return `<header class="topbar">
-    <a class="brand" href="#/">情绪档案<small>如何为爱立界限 · Part 3</small></a>
+    <a class="brand" href="#/">情绪档案</a>
     <div class="nav-actions">${extra}
       <button class="btn ghost" data-nav="archive">情绪档案</button>
     </div>
@@ -74,7 +74,7 @@ function renderHome() {
   app.innerHTML = `<div class="shell">
     ${topbar()}
     <section class="hero">
-      <p class="kicker">${homeCopy.kicker}</p>
+      ${homeCopy.kicker ? `<p class="kicker">${homeCopy.kicker}</p>` : ''}
       <h1>${homeCopy.title}</h1>
       <p class="lead">${homeCopy.lead}</p>
       <div class="intro-grid">${introCards}</div>
@@ -96,7 +96,7 @@ function renderArchive() {
   const empty = `<div class="empty-card">
       <strong>还没有记录</strong>
       <p>做完任何一套，结果会留在这台浏览器里。</p>
-      <button class="btn primary" data-nav="home">去看六套测试</button>
+      <button class="btn primary" data-nav="home">去看测试</button>
     </div>`;
   app.innerHTML = `<div class="shell">
     ${topbar('<button class="btn ghost" data-nav="home">回首页</button>')}
