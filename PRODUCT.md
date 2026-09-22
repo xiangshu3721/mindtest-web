@@ -26,7 +26,8 @@ web
 2. 人格障碍筛查 PDQ-4（126 题，筛查，不是诊断）→ `pdq/index.html`
 3. 成人依恋关系测评（36 题）→ `ecr/index.html`
 4. 寻根之旅 · 原生家庭考古 → `https://xiangshu3721.github.io/root-journey-web/`
-5. 爱的 5 种语言（30 题）→ `https://xiangshu3721.github.io/5loves/`
+5. 情绪健康测试 → `beattie/index.html`
+6. 爱的 5 种语言（30 题）→ `https://xiangshu3721.github.io/5loves/`
 
 每张卡片有对应的静物图、标题和一句介绍。SCL-90 从已提交的版本恢复到 `scl90/`。
 
