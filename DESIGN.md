@@ -100,7 +100,7 @@ This system documents the catalog page (`index.html` / `css/home.css`) and the s
 - Still-life images locked to 4:3 and mounted on the plate
 - Per-plate `--mark` color appears only on 进入 (and focus outline when set)
 
-The shipped catalog is five equal plates, in this order: SCL-90（`#1f3f38`）、PDQ-4（`#7a3140`）、成人依恋（`#6b3a45`）、寻根之旅（`#14352c`）、情绪健康测试 · 如何为爱立界限（`#8a4b12`，still life `img/beattie.jpg`）。`img/beattie.jpg` 是为本目录新画的静物，不是《如何为爱立界限》书中插图。
+The shipped catalog is five equal plates, in this order: SCL-90（`#1f3f38`）、PDQ-4（`#7a3140`）、成人依恋（`#6b3a45`）、寻根之旅（`#14352c`）、情绪健康测试（`#8a4b12`，still life `img/beattie.jpg`）。`img/beattie.jpg` 是为本目录新画的静物，不是《如何为爱立界限》书中插图。
 
 ## Colors
 
