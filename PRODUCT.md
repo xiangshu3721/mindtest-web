@@ -22,14 +22,15 @@ web
 
 目录顺序固定：
 
-1. SCL-90 症状自评量表（90 题，16 岁以上）→ `scl90/index.html`
-2. 人格障碍筛查 PDQ-4（126 题，筛查，不是诊断）→ `pdq/index.html`
-3. 成人依恋关系测评（36 题）→ `ecr/index.html`
-4. 寻根之旅 · 原生家庭考古 → `https://xiangshu3721.github.io/root-journey-web/`
-5. 情绪健康测试 → `beattie/index.html`
-6. 爱的 5 种语言（30 题）→ `https://xiangshu3721.github.io/5loves/`
-7. 巨婴测评（20 项，0–5 分相加；讲座对照，不是诊断）→ `https://xiangshu3721.github.io/juying/`
-8. 职业六芒星（31 个词：划掉 15、10、3，留下底层动力，再复活 3 个现实追求）→ `star/index.html`
+1. 珍爱金字塔 · 自我关系状态评估（36 题，约 5–7 分钟，不是诊断）→ `https://xiangshu3721.github.io/zhenai-pyramid/`
+2. SCL-90 症状自评量表（90 题，16 岁以上）→ `scl90/index.html`
+3. 人格障碍筛查 PDQ-4（126 题，筛查，不是诊断）→ `pdq/index.html`
+4. 成人依恋关系测评（36 题）→ `ecr/index.html`
+5. 寻根之旅 · 原生家庭考古 → `https://xiangshu3721.github.io/root-journey-web/`
+6. 情绪健康测试 → `beattie/index.html`
+7. 爱的 5 种语言（30 题）→ `https://xiangshu3721.github.io/5loves/`
+8. 巨婴测评（20 项，0–5 分相加；讲座对照，不是诊断）→ `https://xiangshu3721.github.io/juying/`
+9. 职业六芒星（31 个词：划掉 15、10、3，留下底层动力，再复活 3 个现实追求）→ `star/index.html`
 
 每张卡片有对应的静物图、标题和一句介绍。SCL-90 从已提交的版本恢复到 `scl90/`。
 
