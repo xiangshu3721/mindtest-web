@@ -84,6 +84,7 @@ function today() {
 }
 
 function render() {
+  if (RK) RK.guard(state.step === "test", () => go("cover"));
   const view = {
     cover: renderCover,
     test: renderTest,
@@ -230,6 +231,7 @@ function recordResult() {
 }
 
 function restart() {
+  if (RK) RK.nickReset();
   sessionStorage.removeItem(STORAGE);
   state.step = "cover";
   state.index = 0;
@@ -366,10 +368,17 @@ app.addEventListener("click", (event) => {
   if (!button || button.disabled) return;
   const action = button.dataset.action;
   if (action === "start") {
-    state.index = 0;
-    go("test");
+    const begin = () => {
+      state.index = 0;
+      go("test");
+    };
+    if (RK) RK.ensureNick(begin);
+    else begin();
   }
-  if (action === "resume") go("test");
+  if (action === "resume") {
+    if (RK) RK.ensureNick(() => go("test"));
+    else go("test");
+  }
   if (action === "answer") choose(Number(button.dataset.value));
   if (action === "prev" && state.index > 0) {
     advanceToken += 1;
@@ -429,7 +438,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-if (RK) RK.configure({ id: "pdq4", title: "人格障碍筛查 PDQ-4", onRestart: restart });
+if (RK) RK.configure({ id: "pdq4", title: "人格障碍筛查 PDQ-4", onRestart: restart, capture: () => RK.capture(app.querySelector(".sheet") || app, { skip: ".actions" }) });
 load();
 render();
 

@@ -71,6 +71,7 @@ function optionLabel(score) {
 }
 
 function render() {
+  if (RK) RK.guard(state.step === "test", () => go("cover"));
   const view = {
     cover: renderCover,
     test: renderTest,
@@ -303,6 +304,7 @@ function go(step) {
 }
 
 function reset() {
+  if (RK) RK.nickReset();
   sessionStorage.removeItem(STORAGE);
   state.step = "cover";
   state.index = 0;
@@ -357,9 +359,13 @@ app.addEventListener("click", (event) => {
   if (!button || button.disabled) return;
   const action = button.dataset.action;
   if (action === "start") {
-    state.index = state.answers.findIndex((value) => value == null);
-    if (state.index < 0) state.index = 0;
-    go("test");
+    const begin = () => {
+      state.index = state.answers.findIndex((value) => value == null);
+      if (state.index < 0) state.index = 0;
+      go("test");
+    };
+    if (RK) RK.ensureNick(begin);
+    else begin();
   }
   if (action === "answer") choose(Number(button.dataset.value));
   if (action === "prev" && state.index > 0) {
@@ -399,7 +405,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-if (RK) RK.configure({ id: "ecr", title: "成人依恋关系测评 ECR", onRestart: reset });
+if (RK) RK.configure({ id: "ecr", title: "成人依恋关系测评 ECR", onRestart: reset, capture: () => RK.capture(app.querySelector(".sheet") || app, { skip: ".actions" }) });
 load();
 render();
 

@@ -406,7 +406,7 @@ function renderResult() {
   const pursueTags = state.pursueOrder.map((word, index) => tagButton(word, "pursue", index, PURSUE_SLOTS[index])).join("");
   let bar = "";
   if (RK) {
-    // 与其他测试同样的按钮条（导出图片 / 历史记录），导出的是六芒星图本身
+    // 与其他测试同样的按钮条（导出图片 / 历史记录），导出的长图含六芒星图、两组词和说明
     bar = RK.bar(summarize(), { restart: false, export: false })
       .replace('<div class="rk-btns">', '<div class="rk-btns"><button type="button" class="rk-btn primary" data-action="save-image">导出图片</button>');
   } else {
@@ -453,6 +453,7 @@ function view() {
 }
 
 function render({ keepScroll = false, focusWord = "" } = {}) {
+  if (RK) RK.guard(["cull1", "cull2", "cull3", "revive"].includes(state.step), () => go("cover"));
   const y = keepScroll ? window.scrollY : 0;
   app.innerHTML = view();
   animateStar = false;
@@ -568,6 +569,7 @@ function resumeStep() {
 }
 
 function startOver() {
+  if (RK) RK.nickReset();
   state.step = "cull1";
   state.cull1 = [];
   state.cull2 = [];
@@ -580,164 +582,6 @@ function startOver() {
   state.recId = "";
   save();
   render();
-}
-
-function boxOf(el, origin) {
-  const rect = el.getBoundingClientRect();
-  return {
-    x: rect.left - origin.left,
-    y: rect.top - origin.top,
-    w: rect.width,
-    h: rect.height,
-  };
-}
-
-function visualLines(el) {
-  const text = el.textContent || "";
-  const node = el.firstChild;
-  if (!node || node.nodeType !== Node.TEXT_NODE || text.length < 2) return [text];
-  const range = document.createRange();
-  const lines = [];
-  let current = "";
-  let lastTop = null;
-  for (let index = 0; index < text.length; index += 1) {
-    range.setStart(node, index);
-    range.setEnd(node, index + 1);
-    const top = range.getBoundingClientRect().top;
-    if (lastTop != null && Math.abs(top - lastTop) > 2 && current) {
-      lines.push(current);
-      current = text[index];
-    } else {
-      current += text[index];
-    }
-    lastTop = top;
-  }
-  if (current) lines.push(current);
-  return lines.length ? lines : [text];
-}
-
-function roundRect(ctx, x, y, w, h, radius) {
-  const r = Math.min(radius, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-async function savePicture() {
-  const root = document.querySelector(".plate");
-  if (!root) return;
-  await document.fonts.ready;
-  const origin = root.getBoundingClientRect();
-  const scale = 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(2, Math.round(origin.width * scale));
-  canvas.height = Math.max(2, Math.round(origin.height * scale));
-  const ctx = canvas.getContext("2d");
-  ctx.scale(scale, scale);
-  const plate = root;
-  const plateBox = { x: 0, y: 0, w: origin.width, h: origin.height };
-  ctx.fillStyle = "#f7f8f6";
-  ctx.fillRect(plateBox.x, plateBox.y, plateBox.w, plateBox.h);
-  ctx.strokeStyle = "rgba(168, 180, 172, 0.55)";
-  ctx.lineWidth = 1;
-  const grid = parseFloat(getComputedStyle(plate).backgroundSize) || 22;
-  for (let x = plateBox.x; x <= plateBox.x + plateBox.w; x += grid) {
-    ctx.beginPath();
-    ctx.moveTo(x, plateBox.y);
-    ctx.lineTo(x, plateBox.y + plateBox.h);
-    ctx.stroke();
-  }
-  for (let y = plateBox.y; y <= plateBox.y + plateBox.h; y += grid) {
-    ctx.beginPath();
-    ctx.moveTo(plateBox.x, y);
-    ctx.lineTo(plateBox.x + plateBox.w, y);
-    ctx.stroke();
-  }
-
-  const svg = root.querySelector(".mark");
-  const star = boxOf(svg, origin);
-  ctx.strokeStyle = "#ef9b28";
-  ctx.lineWidth = Math.max(2, star.w * 0.017);
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  const drawPoly = (points) => {
-    ctx.beginPath();
-    points.forEach(([px, py], index) => {
-      const x = star.x + (px / 100) * star.w;
-      const y = star.y + (py / 100) * star.h;
-      if (index === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.closePath();
-    ctx.stroke();
-  };
-  drawPoly([[50, 8], [86.4, 71], [13.6, 71]]);
-  drawPoly([[50, 92], [13.6, 29], [86.4, 29]]);
-
-  const paintLines = (el, color) => {
-    const ink = el.querySelector(".ink") || el;
-    const rect = boxOf(ink, origin);
-    const style = getComputedStyle(ink);
-    if (el.classList.contains("tag")) {
-      ctx.fillStyle = style.backgroundColor;
-      roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 3);
-      ctx.fill();
-    }
-    ctx.fillStyle = color || style.color;
-    ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const lines = visualLines(ink);
-    const lineHeight = rect.h / lines.length;
-    lines.forEach((line, index) => {
-      ctx.fillText(line, rect.x + rect.w / 2, rect.y + lineHeight * (index + 0.5));
-    });
-  };
-
-  root.querySelectorAll(".tag").forEach((el) => paintLines(el, getComputedStyle(el).color));
-  root.querySelectorAll(".aside").forEach((el) => paintLines(el, getComputedStyle(el).color));
-
-  const spine = root.querySelector(".spine");
-  if (spine) {
-    const rect = boxOf(spine, origin);
-    const style = getComputedStyle(spine);
-    const chars = spine.textContent.trim().split("");
-    ctx.fillStyle = style.color;
-    ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const gap = rect.h / chars.length;
-    chars.forEach((char, index) => {
-      ctx.fillText(char, rect.x + rect.w / 2, rect.y + gap * (index + 0.5));
-    });
-  }
-
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) return;
-  const file = new File([blob], "职业六芒星.png", { type: "image/png" });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: "职业六芒星" });
-      return;
-    } catch (error) {
-      if (error && error.name === "AbortError") return;
-    }
-  }
-  if (RK) {
-    // 手机和微信里下载常常不生效：弹出图片，长按即可保存；电脑上有「下载图片」按钮。
-    RK.showImage(canvas.toDataURL("image/png"), "职业六芒星.png");
-    return;
-  }
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "职业六芒星.png";
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 app.addEventListener("click", (event) => {
@@ -755,8 +599,10 @@ app.addEventListener("click", (event) => {
   const action = event.target.closest("[data-action]");
   if (!action) return;
   const name = action.dataset.action;
-  if (name === "start") go(resumeStep());
-  else if (name === "save-image") savePicture();
+  if (name === "start") {
+    if (RK) RK.ensureNick(() => go(resumeStep()));
+    else go(resumeStep());
+  } else if (name === "save-image") RK.exportImage(summarize());
   else if (name === "retest") startOver();
   else if (name === "cover") go("cover");
   else if (name === "to-cull1") go("cull1");
@@ -769,7 +615,15 @@ app.addEventListener("click", (event) => {
   }
 });
 
-if (RK) RK.configure({ id: "star", title: "职业六芒星", onRestart: startOver });
+function captureStar() {
+  const sections = [{ t: "hex", drive: state.driveOrder.slice(), pursue: state.pursueOrder.slice() }];
+  const roster = app.querySelector(".roster");
+  if (roster) sections.push(...RK.capture(roster));
+  sections.push({ t: "ul", it: summarize().notes.map((x) => ({ x, d: 0, n: 0 })) });
+  return sections;
+}
+
+if (RK) RK.configure({ id: "star", title: "职业六芒星", onRestart: startOver, capture: captureStar });
 migrateOldArchive();
 load();
 if (state.step === "result") {

@@ -114,6 +114,7 @@ function barPercent(score) {
 }
 
 function render() {
+  if (RK) RK.guard(state.step === "profile" || state.step === "test", () => go("cover"));
   const view = {
     cover: renderCover,
     profile: renderProfile,
@@ -404,6 +405,7 @@ function finish() {
 }
 
 function restart() {
+  if (RK) RK.nickReset();
   sessionStorage.removeItem(STORAGE);
   state.step = "cover";
   state.profile = { name: "", gender: "", age: "" };
@@ -421,7 +423,10 @@ app.addEventListener("click", (event) => {
   const button = event.target.closest("[data-action]");
   if (!button || button.disabled) return;
   const action = button.dataset.action;
-  if (action === "start") go("profile");
+  if (action === "start") {
+    if (RK) RK.ensureNick(() => go("profile"));
+    else go("profile");
+  }
   if (action === "cover") go("cover");
   if (action === "gender") {
     state.profile.gender = button.dataset.value;
@@ -499,7 +504,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-if (RK) RK.configure({ id: "scl90", title: "SCL-90 症状自评量表", onRestart: restart });
+if (RK) RK.configure({ id: "scl90", title: "SCL-90 症状自评量表", onRestart: restart, capture: () => RK.capture(app.querySelector(".sheet") || app, { skip: ".actions" }) });
 load();
 render();
 
