@@ -2,8 +2,7 @@ import { CULL_FIRST, CULL_SECOND, CULL_THIRD, GROUPS, KEEP, REVIVE, WORDS } from
 
 const app = document.querySelector("#app");
 const STORAGE = "career-star-v2";
-const ARCHIVE = "career-star-archive-v1";
-const ARCHIVE_MAX = 30;
+const RK_MAX = 30;
 const RK = window.ResultKit;
 const WORD_SET = new Set(WORDS);
 
@@ -28,10 +27,8 @@ const state = {
   driveOrder: [],
   pursueOrder: [],
   pick: null,
-  armReset: false,
   block: "",
-  archiveId: "",
-  archiveAt: 0,
+  recId: "",
 };
 
 let animateStar = false;
@@ -132,8 +129,7 @@ function load() {
     state.revived = saved.revived;
     state.driveOrder = saved.driveOrder;
     state.pursueOrder = saved.pursueOrder;
-    state.archiveId = typeof saved.archiveId === "string" ? saved.archiveId : "";
-    state.archiveAt = Number.isFinite(saved.archiveAt) ? saved.archiveAt : 0;
+    state.recId = typeof saved.recId === "string" ? saved.recId : "";
   } catch {
     sessionStorage.removeItem(STORAGE);
   }
@@ -150,8 +146,7 @@ function save() {
       revived: state.revived,
       driveOrder: state.driveOrder,
       pursueOrder: state.pursueOrder,
-      archiveId: state.archiveId,
-      archiveAt: state.archiveAt,
+      recId: state.recId,
     }));
   } catch {
     /* 这台设备若禁用了会话存储，当次选择仍然有效。 */
@@ -175,82 +170,78 @@ function joinWords(list) {
   return list.map((word) => esc(word)).join("、");
 }
 
-function when(ts) {
-  const date = new Date(ts);
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${date.getMonth() + 1}月${date.getDate()}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+function pickWords(list, size) {
+  return Array.isArray(list) && list.length === size && list.every((word) => WORD_SET.has(word));
 }
 
-function readArchive() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(ARCHIVE) || "[]");
-    if (!Array.isArray(raw)) return [];
-    return raw.filter((item) => (
-      item
-      && typeof item.id === "string"
-      && Array.isArray(item.driveOrder) && item.driveOrder.length === KEEP
-      && Array.isArray(item.pursueOrder) && item.pursueOrder.length === REVIVE
-      && item.driveOrder.every((word) => WORD_SET.has(word))
-      && item.pursueOrder.every((word) => WORD_SET.has(word))
-    ));
-  } catch {
-    return [];
-  }
-}
-
-function writeArchive(list) {
-  try {
-    localStorage.setItem(ARCHIVE, JSON.stringify(list));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function askDeleteRecord(id) {
-  const item = readArchive().find((entry) => entry.id === id);
-  if (!item) return;
-  const doIt = () => {
-    writeArchive(readArchive().filter((entry) => entry.id !== id));
-    render({ keepScroll: true });
+function summarize() {
+  return {
+    headline: `底层动力：${state.driveOrder.join("、")}`,
+    sub: `现实追求：${state.pursueOrder.join("、")}`,
+    metrics: [],
+    notes: [
+      `倒三角（底层动力）是划了三轮之后留下的 ${KEEP} 个词，是对你最要紧的。`,
+      `正三角（现实追求）是从划掉的词里复活的 ${REVIVE} 个，是你现在想去够的。`,
+      "这是一次自我整理，不是打分，也不是职业诊断。",
+    ],
   };
-  if (RK) RK.confirm({ title: "删除这条记录？", text: `${when(item.at)} 的这颗星会从这台设备删除，不能恢复。`, ok: "删除" }, doIt);
-  else if (window.confirm("删除这条记录？")) doIt();
 }
 
-function askClearArchive() {
-  const n = readArchive().length;
-  if (!n) return;
-  const doIt = () => {
-    try { localStorage.removeItem(ARCHIVE); } catch { /* 忽略 */ }
-    render({ keepScroll: true });
-  };
-  if (RK) RK.confirm({ title: "清空全部记录？", text: `这台设备上做过的 ${n} 颗星都会删除，不能恢复。`, ok: "全部清空" }, doIt);
-  else if (window.confirm("清空全部记录？")) doIt();
+// 旧版的「做过的六芒星」(career-star-archive-v1) 并入统一历史记录 (rk.v1.star)，只做一次，成功后才删旧数据。
+function migrateOldArchive() {
+  const OLD = "career-star-archive-v1";
+  const KEY = "rk.v1.star";
+  try {
+    const rawOld = localStorage.getItem(OLD);
+    if (!rawOld) return;
+    const old = JSON.parse(rawOld);
+    if (!Array.isArray(old)) { localStorage.removeItem(OLD); return; }
+    const moved = old
+      .filter((item) => item && typeof item.id === "string" && pickWords(item.driveOrder, KEEP) && pickWords(item.pursueOrder, REVIVE))
+      .map((item) => ({
+        id: `m${item.id}`,
+        t: Number.isFinite(Number(item.at)) ? Number(item.at) : Date.now(),
+        title: "职业六芒星",
+        s: {
+          headline: `底层动力：${item.driveOrder.join("、")}`,
+          sub: `现实追求：${item.pursueOrder.join("、")}`,
+          who: "",
+          metrics: [],
+          notes: [
+            `倒三角（底层动力）是划了三轮之后留下的 ${KEEP} 个词，是对你最要紧的。`,
+            `正三角（现实追求）是从划掉的词里复活的 ${REVIVE} 个，是你现在想去够的。`,
+            "这是一次自我整理，不是打分，也不是职业诊断。",
+          ],
+        },
+      }));
+    let current = [];
+    const rawNew = localStorage.getItem(KEY);
+    if (rawNew) {
+      const parsed = JSON.parse(rawNew);
+      if (parsed && Array.isArray(parsed.items)) current = parsed.items;
+    }
+    const have = new Set(current.map((item) => item && item.id));
+    const merged = current.concat(moved.filter((item) => !have.has(item.id)))
+      .filter((item) => item && typeof item.t === "number")
+      .sort((a, b) => b.t - a.t)
+      .slice(0, RK_MAX);
+    localStorage.setItem(KEY, JSON.stringify({ v: 1, items: merged }));
+    const back = JSON.parse(localStorage.getItem(KEY) || "{}");
+    const ids = new Set((back && Array.isArray(back.items) ? back.items : []).map((item) => item.id));
+    if (merged.every((item) => ids.has(item.id))) localStorage.removeItem(OLD);
+  } catch {
+    /* 存不下或旧数据坏了：保留旧数据原样，不影响做题和看结果。 */
+  }
 }
 
 function rememberResult() {
+  if (!RK) return;
   if (state.driveOrder.length !== KEEP || state.pursueOrder.length !== REVIVE) return;
-  if (!state.archiveId) {
-    state.archiveId = String(Date.now());
-    state.archiveAt = Date.now();
-  }
-  const record = {
-    id: state.archiveId,
-    at: state.archiveAt || Date.now(),
-    driveOrder: state.driveOrder.slice(),
-    pursueOrder: state.pursueOrder.slice(),
-    cull1: state.cull1.slice(),
-    cull2: state.cull2.slice(),
-    cull3: state.cull3.slice(),
-    revived: state.revived.slice(),
-  };
-  const next = [record, ...readArchive().filter((item) => item.id !== record.id)].slice(0, ARCHIVE_MAX);
-  try {
-    localStorage.setItem(ARCHIVE, JSON.stringify(next));
-  } catch {
-    /* 存不下时，这一次的星仍然留在当前页面。 */
-  }
+  // 在结果页调整顺序后再次保存：替换掉这一次做题的上一条，不重复堆记录
+  if (state.recId) RK.remove(state.recId);
+  const res = RK.save(summarize());
+  state.recId = (res && res.id) || "";
+  save();
 }
 
 function wordList(words) {
@@ -262,24 +253,6 @@ function hasProgress() {
 }
 
 function renderCover() {
-  const saved = readArchive();
-  const savedBlock = saved.length ? `
-    <section class="saved">
-      <h2>做过的六芒星</h2>
-      <ul>
-        ${saved.map((item) => `
-          <li class="saved-row">
-            <button type="button" data-action="open" data-id="${esc(item.id)}">
-              <b>${esc(when(item.at))}</b>
-              <span>底层动力 ${esc(item.driveOrder.join("、"))}</span>
-            </button>
-            <button type="button" class="saved-del" data-action="del" data-id="${esc(item.id)}" aria-label="删除 ${esc(when(item.at))} 这条记录">删除</button>
-          </li>
-        `).join("")}
-      </ul>
-      <button type="button" class="saved-clear" data-action="clear-archive">清空全部记录</button>
-    </section>
-  ` : "";
   return shell(`
     <h1 tabindex="-1">职业六芒星</h1>
     <p class="lead">划掉的，是对你没那么重要的。留下的，一轮比一轮更要紧。${WORDS.length} 个词这样划三轮，最后剩下的 ${KEEP} 个最重要。</p>
@@ -298,11 +271,10 @@ function renderCover() {
         <li>从划掉的 ${CULL_FIRST + CULL_SECOND + CULL_THIRD} 个里复活 ${REVIVE} 个。这 ${REVIVE} 个是现实追求，写在正三角上。</li>
       </ol>
     </div>
-    ${savedBlock}
     <div class="actions">
       <button class="primary" type="button" data-action="start">${esc(resumeLabel())}</button>
-      ${hasProgress() && state.armReset ? `<button class="ghost" type="button" data-action="retest">确定清掉，重新测试</button><button class="ghost" type="button" data-action="cancel-reset">先不重来</button>` : ""}
-      ${hasProgress() && !state.armReset ? `<button class="ghost" type="button" data-action="retest">重新测试</button>` : ""}
+      ${RK ? RK.historyButton({ className: "ghost" }) : ""}
+      ${hasProgress() ? `<button class="ghost" type="button" data-action="retest">重新测试</button>` : ""}
       <a class="ghost" href="../index.html">回到目录</a>
     </div>
     <p class="fine">这是一次自我整理，不是打分，也不是职业诊断。选择留在这台设备上，不会上传。</p>
@@ -432,7 +404,14 @@ function tagButton(word, role, index, slot) {
 function renderResult() {
   const driveTags = state.driveOrder.map((word, index) => tagButton(word, "drive", index, DRIVE_SLOTS[index])).join("");
   const pursueTags = state.pursueOrder.map((word, index) => tagButton(word, "pursue", index, PURSUE_SLOTS[index])).join("");
-  const resetLabel = state.armReset ? "确定清掉，重新测试" : "重新测试";
+  let bar = "";
+  if (RK) {
+    // 与其他测试同样的按钮条（导出图片 / 历史记录），导出的是六芒星图本身
+    bar = RK.bar(summarize(), { restart: false, export: false })
+      .replace('<div class="rk-btns">', '<div class="rk-btns"><button type="button" class="rk-btn primary" data-action="save-image">导出图片</button>');
+  } else {
+    bar = '<div class="actions"><button class="primary" type="button" data-action="save-image">导出图片</button></div>';
+  }
   return shell(`
     <div class="capture">
       <figure class="plate">
@@ -456,10 +435,9 @@ function renderResult() {
         </div>
       </section>
     </div>
-    <div class="actions">
-      <button class="primary" type="button" data-action="save-image">保存图片</button>
-      <button class="ghost" type="button" data-action="retest">${esc(resetLabel)}</button>
-      ${state.armReset ? `<button class="ghost" type="button" data-action="cancel-reset">先不重来</button>` : ""}
+    ${bar}
+    <div class="actions" style="margin-top:22px">
+      <button class="ghost" type="button" data-action="retest">重新测试</button>
       <a class="ghost" href="../index.html">回到目录</a>
     </div>
   `);
@@ -490,7 +468,6 @@ function render({ keepScroll = false, focusWord = "" } = {}) {
 
 function go(step, extra = {}) {
   state.step = step;
-  state.armReset = false;
   state.block = "";
   state.pick = null;
   reconcile();
@@ -544,7 +521,6 @@ function onWord(word) {
   } else {
     return;
   }
-  state.armReset = false;
   reconcile();
   save();
   render({ keepScroll: true, focusWord: word });
@@ -600,48 +576,8 @@ function startOver() {
   state.driveOrder = [];
   state.pursueOrder = [];
   state.pick = null;
-  state.armReset = false;
   state.block = "";
-  state.archiveId = "";
-  state.archiveAt = 0;
-  save();
-  render();
-}
-
-function shapeForResult() {
-  const kept = state.driveOrder.slice();
-  const revived = state.pursueOrder.slice();
-  const keptSet = new Set(kept);
-  const revivedSet = new Set(revived);
-  if (keptSet.size !== KEEP || revivedSet.size !== REVIVE) return;
-  if ([...keptSet].some((word) => revivedSet.has(word))) return;
-  if (keptIds().length === KEEP && sameSet(keptIds(), kept) && state.revived.length === REVIVE && sameSet(state.revived, revived)) return;
-  const rest = WORDS.filter((word) => !keptSet.has(word) && !revivedSet.has(word));
-  const head = CULL_FIRST - REVIVE;
-  state.cull1 = [...rest.slice(0, head), ...revived];
-  state.cull2 = rest.slice(head, head + CULL_SECOND);
-  state.cull3 = rest.slice(head + CULL_SECOND, head + CULL_SECOND + CULL_THIRD);
-  state.revived = revived.slice();
-}
-
-function openRecord(id) {
-  const record = readArchive().find((item) => item.id === id);
-  if (!record) return;
-  state.step = "result";
-  state.cull1 = record.cull1 || [];
-  state.cull2 = record.cull2 || [];
-  state.cull3 = record.cull3 || [];
-  state.revived = record.revived || record.pursueOrder.slice();
-  state.driveOrder = record.driveOrder.slice();
-  state.pursueOrder = record.pursueOrder.slice();
-  state.archiveId = record.id;
-  state.archiveAt = record.at;
-  state.pick = null;
-  state.armReset = false;
-  state.block = "";
-  shapeForResult();
-  reconcile();
-  animateStar = true;
+  state.recId = "";
   save();
   render();
 }
@@ -820,18 +756,8 @@ app.addEventListener("click", (event) => {
   if (!action) return;
   const name = action.dataset.action;
   if (name === "start") go(resumeStep());
-  else if (name === "open") openRecord(action.dataset.id);
-  else if (name === "del") askDeleteRecord(action.dataset.id);
-  else if (name === "clear-archive") askClearArchive();
   else if (name === "save-image") savePicture();
-  else if (name === "retest") {
-    if (hasProgress() && !state.armReset) {
-      state.armReset = true;
-      render({ keepScroll: true });
-    } else {
-      startOver();
-    }
-  }
+  else if (name === "retest") startOver();
   else if (name === "cover") go("cover");
   else if (name === "to-cull1") go("cull1");
   else if (name === "to-cull2") go("cull2");
@@ -839,12 +765,12 @@ app.addEventListener("click", (event) => {
   else if (name === "to-revive" && keptIds().length === KEEP) go("revive");
   else if (name === "to-result" && state.revived.length === REVIVE) go("result");
   else if (name === "cancel-reset") {
-    state.armReset = false;
-    render({ keepScroll: true });
+      render({ keepScroll: true });
   }
 });
 
-if (RK) RK.configure({ id: "star", title: "职业六芒星" });
+if (RK) RK.configure({ id: "star", title: "职业六芒星", onRestart: startOver });
+migrateOldArchive();
 load();
 if (state.step === "result") {
   animateStar = true;
