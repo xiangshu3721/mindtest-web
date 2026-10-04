@@ -6,12 +6,13 @@ import { scoreLikert, scoreMcq, scoreTf, computeTotal, starsLabel } from './lib/
 import {
   loadArchive,
   saveArchiveEntry,
+  deleteArchiveEntry,
   clearArchive,
   saveDraft,
   loadDraft,
   clearDraft,
 } from './lib/storage';
-import { renderArchiveCard, renderResultBody } from './ui/result';
+import { renderArchiveCard, renderResultBody, summaryOfEntry } from './ui/result';
 
 type Step = 'warning' | 'assessment' | 'mcq' | 'tf' | 'result';
 
@@ -22,9 +23,25 @@ interface DraftState {
   mcq: (string | 'NA' | null)[];
   tf: (('yes' | 'no' | 'NA') | null)[];
   angerFill?: string;
+  finishedAt?: string;
 }
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
+
+// 共用小工具（../js/result-kit.js）：导出图片、二次确认。没加载到时退回浏览器自带的 confirm。
+const RK = (window as unknown as { ResultKit?: any }).ResultKit;
+
+function askConfirm(title: string, text: string, ok: string, then: () => void) {
+  if (RK) RK.confirm({ title, text, ok }, then);
+  else if (window.confirm(`${title}\n${text}`)) then();
+}
+
+function exportEntry(entry: ArchiveEntry) {
+  const test = getTestById(entry.testId);
+  if (!RK) return;
+  RK.configure({ id: 'beattie-' + entry.testId, title: entry.title });
+  RK.exportImage(summaryOfEntry(entry, test?.maxPossible ?? 230), new Date(entry.completedAt).getTime());
+}
 
 function route(): { page: string; id?: string } {
   const hash = location.hash.replace(/^#\/?/, '') || '';
@@ -105,7 +122,7 @@ function renderArchive() {
         <h1>情绪档案</h1>
         <p>只留在这台浏览器里，不会上传。</p>
       </header>
-      ${list.length === 0 ? empty : `<div class="archive-list">${list.map((e) => renderArchiveCard(e)).join('')}</div>`}
+      ${list.length === 0 ? empty : `<div class="archive-list">${list.map((e, i) => renderArchiveCard(e, i, getTestById(e.testId)?.maxPossible ?? 230)).join('')}</div>`}
       ${list.length ? '<button class="btn danger" data-clear>清空档案</button>' : ''}
     </section>
   </div>${footerHtml()}`;
@@ -113,10 +130,26 @@ function renderArchive() {
   app.querySelector('[data-nav="home"]')?.addEventListener('click', () => go(''));
   app.querySelector('[data-nav="archive"]')?.addEventListener('click', () => go('archive'));
   app.querySelector('[data-clear]')?.addEventListener('click', () => {
-    if (confirm('确定清空全部情绪档案？')) {
+    askConfirm('清空全部情绪档案？', `这台设备上的 ${list.length} 条记录都会删除，不能恢复。`, '全部清空', () => {
       clearArchive();
       renderArchive();
-    }
+    });
+  });
+  app.querySelectorAll<HTMLElement>('[data-export-entry]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const entry = list[Number(btn.dataset.exportEntry)];
+      if (entry) exportEntry(entry);
+    });
+  });
+  app.querySelectorAll<HTMLElement>('[data-del-entry]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const entry = list[Number(btn.dataset.delEntry)];
+      if (!entry) return;
+      askConfirm('删除这条记录？', `${entry.title} 这一次的结果会从这台设备删除，不能恢复。`, '删除', () => {
+        deleteArchiveEntry(entry);
+        renderArchive();
+      });
+    });
   });
 }
 
@@ -161,6 +194,8 @@ function renderTest(test: QuizTest) {
   if (draft.likert.length !== test.likertItems.length) draft = emptyDraft(test);
 
   const persist = () => saveDraft(test.id, draft);
+  let saveOk: boolean | null = null; // null = 这次没有交卷（刷新后回到结果页）
+  let finishedEntry: ArchiveEntry | null = null;
 
   const paint = () => {
     const pct = progressPct(draft.step, test);
@@ -419,10 +454,38 @@ function renderTest(test: QuizTest) {
         total,
         bandText: band?.text ?? '',
       };
-      saveArchiveEntry(entry);
+      saveOk = saveArchiveEntry(entry);
+      finishedEntry = entry;
+      draft.finishedAt = entry.completedAt;
       draft.step = 'result';
       persist();
       paint();
+    });
+
+    const note = app.querySelector<HTMLElement>('[data-save-note]');
+    if (note) {
+      if (saveOk === true) note.textContent = '✓ 这次结果已存进「情绪档案」（只在这台设备上，不上传）。';
+      else if (saveOk === false) {
+        note.textContent = '这台设备暂时存不下记录（可能是无痕模式或空间已满）。结果照常能看，建议先点「导出图片」留一份。';
+        note.classList.add('warn');
+      } else note.textContent = '每次做完的结果都会存进「情绪档案」。';
+    }
+
+    app.querySelector('[data-export]')?.addEventListener('click', () => {
+      const a = scoreLikert(draft.likert);
+      const m = scoreMcq(test.mcqItems, draft.mcq);
+      const t = scoreTf(test.tfItems, draft.tf);
+      const { total, band } = computeTotal(test, { assessment: a, mcq: m, tf: t });
+      const entry: ArchiveEntry =
+        finishedEntry ?? {
+          testId: test.id,
+          title: test.title,
+          completedAt: draft.finishedAt || new Date().toISOString(),
+          sectionScores: { assessment: a, mcq: m, tf: t },
+          total,
+          bandText: band?.text ?? '',
+        };
+      exportEntry(entry);
     });
 
     app.querySelector('[data-retry]')?.addEventListener('click', () => {

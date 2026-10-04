@@ -670,3 +670,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .btn, .test-card { transition: none; }
 }
+
+.save-note { margin: 0.9rem 0 0.2rem; font-size: 0.85rem; color: var(--muted); }
+.save-note.warn { color: var(--danger); }
+.arch-actions { display: flex; gap: 0.5rem; margin-top: 0.7rem; }
+.arch-actions .btn { flex: 1; min-height: 44px; }

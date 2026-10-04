@@ -13,6 +13,7 @@ import { rushCheck, scorePdq4 } from "./score.js";
 
 const app = document.querySelector("#app");
 const STORAGE = "pdq4-session";
+const RK = window.ResultKit;
 
 const state = {
   step: "cover",
@@ -113,7 +114,7 @@ function renderCover() {
       <span>过去几年</span>
       <span>约 15 分钟</span>
     </div>
-    <div class="actions">${resume}</div>
+    <div class="actions">${resume}${RK ? RK.historyButton({ className: "ghost" }) : ""}</div>
     <p class="fine">作答和计分都留在这台设备上，不会上传。冲动的 6 个小项、15 岁前的 15 个小项，会各自合成 1 分后再计入边缘型和反社会型。</p>
   `);
 }
@@ -201,6 +202,46 @@ function scaleBlock(scale) {
   `;
 }
 
+function summarize() {
+  const result = state.result;
+  const hits = result.positiveScales.map((scale) => scale.name);
+  const notes = [];
+  if (result.suspect.flagged) notes.push("第 64 题或第 76 题答了「是」，这份问卷按可疑处理，先别把分数当成人格画像。");
+  if (result.tooGood.flagged) notes.push("有几道几乎人人都会承认的小题被否认了，回答可能偏完美，实际倾向或许比卷面更明显。");
+  notes.push("这是筛查，不是诊断。达到划界只说明值得进一步了解。");
+  return {
+    headline: result.verdict.title,
+    sub: result.verdict.text,
+    metrics: [
+      { label: "达到划界的维度", value: `${result.positiveCount} / ${result.scales.length}${hits.length ? "：" + hits.join("、") : ""}`, frac: result.positiveCount / result.scales.length, tone: result.positiveCount ? "high" : "ok" },
+      ...result.scales.map((scale) => ({
+        label: scale.alias ? `${scale.name} · ${scale.alias}` : scale.name,
+        value: `${scale.score} / ${scale.max}${scale.positive ? " · 达到划界" : ""}`,
+        frac: scale.max ? scale.score / scale.max : 0,
+        tone: scale.positive ? "high" : "ok",
+      })),
+    ],
+    notes,
+  };
+}
+
+function recordResult() {
+  if (RK && state.result) RK.save(summarize());
+}
+
+function restart() {
+  sessionStorage.removeItem(STORAGE);
+  state.step = "cover";
+  state.index = 0;
+  state.answers = Array(QUESTIONS.length).fill(null);
+  state.times = Array(QUESTIONS.length).fill(null);
+  state.result = null;
+  state.rushed = false;
+  state.error = "";
+  render();
+  window.scrollTo(0, 0);
+}
+
 function validityLine(label, block, detail) {
   const mark = block.flagged ? "需要注意" : "未触发";
   return `<p><b>${esc(label)} ${block.score} / ${block.max}</b> · ${mark}。${esc(detail)}</p>`;
@@ -250,6 +291,7 @@ function renderReport() {
       <summary>查看 126 题的作答</summary>
       <ol>${ledger}</ol>
     </details>
+    ${RK ? RK.bar(summarize(), { restart: false }) : ""}
     <div class="actions">
       <button class="ghost" type="button" data-action="restart">重新测评</button>
       <button class="ghost" type="button" data-action="print">打印报告</button>
@@ -315,6 +357,7 @@ function finish() {
     go("rush");
     return;
   }
+  recordResult();
   go("report");
 }
 
@@ -358,20 +401,10 @@ app.addEventListener("click", (event) => {
   if (action === "force-report") {
     state.rushed = true;
     state.result = scorePdq4(state.answers);
+    recordResult();
     go("report");
   }
-  if (action === "restart") {
-    sessionStorage.removeItem(STORAGE);
-    state.step = "cover";
-    state.index = 0;
-    state.answers = Array(QUESTIONS.length).fill(null);
-    state.times = Array(QUESTIONS.length).fill(null);
-    state.result = null;
-    state.rushed = false;
-    state.error = "";
-    render();
-    window.scrollTo(0, 0);
-  }
+  if (action === "restart") restart();
   if (action === "print") window.print();
 });
 
@@ -396,6 +429,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+if (RK) RK.configure({ id: "pdq4", title: "人格障碍筛查 PDQ-4", onRestart: restart });
 load();
 render();
 
