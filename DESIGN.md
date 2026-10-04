@@ -100,7 +100,7 @@ This system documents the catalog page (`index.html` / `css/home.css`) and the s
 - Still-life images locked to 4:3 and mounted on the plate
 - Per-plate `--mark` color appears only on 进入 (and focus outline when set)
 
-The shipped catalog is five equal plates, in this order: SCL-90（`#1f3f38`）、PDQ-4（`#7a3140`）、成人依恋（`#6b3a45`）、寻根之旅（`#14352c`）、情绪健康测试（`#8a4b12`，still life `img/beattie.jpg`）。`img/sefs.jpg` 是为 SEFS 新画的封面（宣纸米白底，四个相叠的淡色圆对应四个体验维度，一枚朱印“感”），无真人、无二维码，排在目录第一位，外链到独立站点；`img/zhenai.jpg` 是用珍爱金字塔 3D 模型几何渲染的封面（宣纸米白、淡赭青灰、一枚朱印），无真人、无二维码，顺延排第二，外链到独立站点。`img/beattie.jpg` 是为本目录新画的静物，不是《如何为爱立界限》书中插图。
+The shipped catalog is five equal plates, in this order: SCL-90（`#1f3f38`）、PDQ-4（`#7a3140`）、成人依恋（`#6b3a45`）、寻根之旅（`#14352c`）、情绪健康测试（`#8a4b12`，still life `img/beattie.jpg`）。`img/sefs.jpg` 是为 SEFS 新画的封面（宣纸米白底，四个相叠的淡色圆对应四个体验维度，一枚朱印“感”），无真人、无二维码，排在目录第一位，外链到独立站点；`img/geren-chongdian.jpg` 是为个人充电新画的封面（宣纸米白、层叠青绿山丘、电池与电量环、一枚朱印“电”，按 asva-official 的同名 16:9 封面改成 4:3 重新构图），无真人、无二维码，排第二，外链到独立站点；`img/zhenai.jpg` 是用珍爱金字塔 3D 模型几何渲染的封面（宣纸米白、淡赭青灰、一枚朱印），无真人、无二维码，顺延排第三，外链到独立站点。`img/beattie.jpg` 是为本目录新画的静物，不是《如何为爱立界限》书中插图。
 
 ## Colors
 
