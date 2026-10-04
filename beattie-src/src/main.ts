@@ -36,11 +36,39 @@ function askConfirm(title: string, text: string, ok: string, then: () => void) {
   else if (window.confirm(`${title}\n${text}`)) then();
 }
 
+/** 把结果页（和结果页同一份内容）画进一张完整长图：先在屏幕外渲染一遍结果页，抓下全部板块，再交给共用导出。 */
 function exportEntry(entry: ArchiveEntry) {
   const test = getTestById(entry.testId);
-  if (!RK) return;
+  if (!RK || !test) return;
   RK.configure({ id: 'beattie-' + entry.testId, title: entry.title });
-  RK.exportImage(summaryOfEntry(entry, test?.maxPossible ?? 230), new Date(entry.completedAt).getTime());
+  const sections = {
+    assessment: Number(entry.sectionScores?.assessment) || 0,
+    mcq: Number(entry.sectionScores?.mcq) || 0,
+    tf: Number(entry.sectionScores?.tf) || 0,
+  };
+  const host = document.createElement('div');
+  host.setAttribute('aria-hidden', 'true');
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:720px;pointer-events:none;';
+  host.innerHTML =
+    '<div class="shell">' +
+    renderResultBody({ test, sections, total: Number(entry.total) || 0, bandText: entry.bandText, bandRange: bandRangeOf(test, Number(entry.total) || 0) }) +
+    '</div>' +
+    footerHtml();
+  document.body.appendChild(host);
+  let sec: unknown[] = [];
+  try {
+    sec = RK.capture(host, { skip: '.save-note,.sticky-bar' });
+  } catch {
+    sec = [];
+  }
+  host.remove();
+  const summary = { ...summaryOfEntry(entry, test.maxPossible ?? 230), sec };
+  RK.exportImage(summary, new Date(entry.completedAt).getTime(), { nick: entry.nick || '' });
+}
+
+function bandRangeOf(test: QuizTest, total: number): string {
+  const hit = test.bands.find((b) => total >= b.min && total <= b.max);
+  return hit ? `${hit.min}–${hit.max}` : '';
 }
 
 function route(): { page: string; id?: string } {
@@ -193,11 +221,14 @@ function renderTest(test: QuizTest) {
   // sanitize lengths
   if (draft.likert.length !== test.likertItems.length) draft = emptyDraft(test);
 
+  if (RK) RK.configure({ id: 'beattie-' + test.id, title: test.title });
   const persist = () => saveDraft(test.id, draft);
   let saveOk: boolean | null = null; // null = 这次没有交卷（刷新后回到结果页）
   let finishedEntry: ArchiveEntry | null = null;
 
   const paint = () => {
+    // 昵称门槛：直接打开这套题的链接、刷新后恢复进度、点「重做」，只要还没确认过昵称，就先补录；点「返回」回首页。
+    if (RK) RK.guard(draft.step !== 'result', () => go(''));
     const pct = progressPct(draft.step, test);
     let body = '';
 
@@ -453,6 +484,7 @@ function renderTest(test: QuizTest) {
         sectionScores: { assessment: a, mcq: m, tf: t },
         total,
         bandText: band?.text ?? '',
+        ...(RK && RK.nick.get() ? { nick: RK.nick.get() } : {}),
       };
       saveOk = saveArchiveEntry(entry);
       finishedEntry = entry;
@@ -484,11 +516,14 @@ function renderTest(test: QuizTest) {
           sectionScores: { assessment: a, mcq: m, tf: t },
           total,
           bandText: band?.text ?? '',
+          ...(RK && RK.nick.get() ? { nick: RK.nick.get() } : {}),
         };
       exportEntry(entry);
     });
 
     app.querySelector('[data-retry]')?.addEventListener('click', () => {
+      if (RK) RK.nickReset();
+      finishedEntry = null;
       clearDraft(test.id);
       draft = emptyDraft(test);
       persist();
@@ -509,6 +544,7 @@ function renderTest(test: QuizTest) {
 }
 
 function render() {
+  if (RK) RK.closeNick();
   const { page, id } = route();
   if (page === 'archive') return renderArchive();
   if (page === 'test' && id) {

@@ -60,4 +60,6 @@ export interface ArchiveEntry {
   sectionScores: { assessment: number; mcq: number; tf: number };
   total: number;
   bandText: string;
+  /** 做这一次时填的昵称（旧记录没有） */
+  nick?: string;
 }

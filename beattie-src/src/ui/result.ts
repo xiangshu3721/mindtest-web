@@ -150,7 +150,7 @@ export function renderArchiveCard(entry: ArchiveEntry, index: number, maxPossibl
       <div class="lamp" aria-hidden="true"></div>
       <div class="archive-id">
         <strong>${esc(entry.title)}</strong>
-        <div class="when">${esc(when)} · 上海</div>
+        <div class="when">${entry.nick ? esc(entry.nick) + ' · ' : ''}${esc(when)} · 上海</div>
       </div>
       <div class="arch-total">${total}<small>/${maxPossible}</small></div>
     </header>
