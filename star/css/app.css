@@ -501,43 +501,7 @@ h2 {
   line-height: 1.5;
 }
 
-.saved { margin-top: 28px; }
 
-.saved h2 {
-  margin: 0;
-  font-size: 22px;
-}
-
-.saved ul {
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.saved button {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  min-height: 44px;
-  margin-top: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: transparent;
-  text-align: left;
-}
-
-.saved button b { font-weight: 560; }
-
-.saved button span {
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.45;
-}
-
-.saved button:hover { background: rgba(122, 49, 64, 0.06); }
 
 @media (min-width: 720px) {
   .plate { aspect-ratio: 16 / 9.2; background-size: 28px 28px; }
@@ -606,28 +570,4 @@ h2 {
   .dock,
   .actions,
   .hint { display: none; }
-}
-
-.saved-row {
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
-}
-
-.saved-row > button:first-child { flex: 1 1 auto; width: auto; }
-
-.saved button.saved-del,
-.saved button.saved-clear {
-  width: auto;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent, #7a3140);
-  font-size: 14px;
-}
-
-.saved button.saved-clear {
-  margin-top: 12px;
-  padding: 8px 14px;
-  min-height: 40px;
 }
