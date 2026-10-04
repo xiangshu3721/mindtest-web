@@ -26,6 +26,40 @@ function statusBlock(insight: BandInsight, total: number, maxPossible: number): 
   </div>`;
 }
 
+const TONE_MAP: Record<string, 'ok' | 'mid' | 'high'> = {
+  ok: 'ok',
+  gold: 'mid',
+  soft: 'mid',
+  warn: 'mid',
+  danger: 'high',
+  deep: 'high',
+};
+
+/** 交给「导出图片」的摘要：一句话结论 + 分数结构 + 几条说人话的提示。 */
+export function summaryOfEntry(entry: ArchiveEntry, maxPossible = 230) {
+  const sections = sectionsOf(entry);
+  const total = Number(entry.total) || 0;
+  const insight = insightFor(entry.testId, total);
+  const tone = TONE_MAP[insight?.tone ?? 'gold'] ?? 'mid';
+  const frac = (v: number, m: number) => (m > 0 ? Math.max(0, Math.min(1, v / m)) : 0);
+  const notes: string[] = [];
+  if (insight) {
+    insight.means.slice(0, 3).forEach((line) => notes.push(line));
+    insight.actions.slice(0, 2).forEach((line) => notes.push('可以试试：' + line));
+  }
+  return {
+    headline: insight ? `${insight.lamp}：${insight.headline}` : `总分 ${total} / ${maxPossible}`,
+    sub: `总分 ${total} / ${maxPossible}。这是对照书中观点写的学习笔记，不是诊断。`,
+    metrics: [
+      { label: '总分', value: `${total} / ${maxPossible}`, frac: frac(total, maxPossible), tone },
+      { label: '评估', value: `${sections.assessment} / 100`, frac: frac(sections.assessment, 100), tone },
+      { label: '选择', value: `${sections.mcq} / 50`, frac: frac(sections.mcq, 50), tone },
+      { label: '判断', value: `${sections.tf} / 80`, frac: frac(sections.tf, 80), tone },
+    ],
+    notes,
+  };
+}
+
 export function renderResultBody(opts: {
   test: QuizTest;
   sections: SectionScores;
@@ -81,15 +115,17 @@ export function renderResultBody(opts: {
     ${drama}
     ${book}
 
+    <p class="save-note" data-save-note></p>
     <div class="sticky-bar">
+      <button class="btn primary" data-export>导出图片</button>
       <button class="btn ghost" data-retry>重做</button>
       <button class="btn ghost" data-archive>档案</button>
-      <button class="btn primary" data-home>回首页</button>
+      <button class="btn ghost" data-home>回首页</button>
     </div>
   </section>`;
 }
 
-export function renderArchiveCard(entry: ArchiveEntry, maxPossible = 230): string {
+export function renderArchiveCard(entry: ArchiveEntry, index: number, maxPossible = 230): string {
   const sections = sectionsOf(entry);
   const total = Number(entry.total) || 0;
   const insight = insightFor(entry.testId, total);
@@ -123,5 +159,9 @@ export function renderArchiveCard(entry: ArchiveEntry, maxPossible = 230): strin
     <p class="arch-split">评估 ${sections.assessment} · 选择 ${sections.mcq} · 判断 ${sections.tf}</p>
     ${miniBars(sections)}
     ${book}
+    <div class="arch-actions">
+      <button class="btn ghost" data-export-entry="${index}">导出图片</button>
+      <button class="btn danger" data-del-entry="${index}">删除这条</button>
+    </div>
   </article>`;
 }

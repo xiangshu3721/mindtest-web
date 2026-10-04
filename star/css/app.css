@@ -607,3 +607,27 @@ h2 {
   .actions,
   .hint { display: none; }
 }
+
+.saved-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.saved-row > button:first-child { flex: 1 1 auto; width: auto; }
+
+.saved button.saved-del,
+.saved button.saved-clear {
+  width: auto;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, #7a3140);
+  font-size: 14px;
+}
+
+.saved button.saved-clear {
+  margin-top: 12px;
+  padding: 8px 14px;
+  min-height: 40px;
+}

@@ -3,6 +3,8 @@ import { CULL_FIRST, CULL_SECOND, CULL_THIRD, GROUPS, KEEP, REVIVE, WORDS } from
 const app = document.querySelector("#app");
 const STORAGE = "career-star-v2";
 const ARCHIVE = "career-star-archive-v1";
+const ARCHIVE_MAX = 30;
+const RK = window.ResultKit;
 const WORD_SET = new Set(WORDS);
 
 const DRIVE_SLOTS = [
@@ -196,6 +198,37 @@ function readArchive() {
   }
 }
 
+function writeArchive(list) {
+  try {
+    localStorage.setItem(ARCHIVE, JSON.stringify(list));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function askDeleteRecord(id) {
+  const item = readArchive().find((entry) => entry.id === id);
+  if (!item) return;
+  const doIt = () => {
+    writeArchive(readArchive().filter((entry) => entry.id !== id));
+    render({ keepScroll: true });
+  };
+  if (RK) RK.confirm({ title: "删除这条记录？", text: `${when(item.at)} 的这颗星会从这台设备删除，不能恢复。`, ok: "删除" }, doIt);
+  else if (window.confirm("删除这条记录？")) doIt();
+}
+
+function askClearArchive() {
+  const n = readArchive().length;
+  if (!n) return;
+  const doIt = () => {
+    try { localStorage.removeItem(ARCHIVE); } catch { /* 忽略 */ }
+    render({ keepScroll: true });
+  };
+  if (RK) RK.confirm({ title: "清空全部记录？", text: `这台设备上做过的 ${n} 颗星都会删除，不能恢复。`, ok: "全部清空" }, doIt);
+  else if (window.confirm("清空全部记录？")) doIt();
+}
+
 function rememberResult() {
   if (state.driveOrder.length !== KEEP || state.pursueOrder.length !== REVIVE) return;
   if (!state.archiveId) {
@@ -212,7 +245,7 @@ function rememberResult() {
     cull3: state.cull3.slice(),
     revived: state.revived.slice(),
   };
-  const next = [record, ...readArchive().filter((item) => item.id !== record.id)].slice(0, 8);
+  const next = [record, ...readArchive().filter((item) => item.id !== record.id)].slice(0, ARCHIVE_MAX);
   try {
     localStorage.setItem(ARCHIVE, JSON.stringify(next));
   } catch {
@@ -235,14 +268,16 @@ function renderCover() {
       <h2>做过的六芒星</h2>
       <ul>
         ${saved.map((item) => `
-          <li>
+          <li class="saved-row">
             <button type="button" data-action="open" data-id="${esc(item.id)}">
               <b>${esc(when(item.at))}</b>
               <span>底层动力 ${esc(item.driveOrder.join("、"))}</span>
             </button>
+            <button type="button" class="saved-del" data-action="del" data-id="${esc(item.id)}" aria-label="删除 ${esc(when(item.at))} 这条记录">删除</button>
           </li>
         `).join("")}
       </ul>
+      <button type="button" class="saved-clear" data-action="clear-archive">清空全部记录</button>
     </section>
   ` : "";
   return shell(`
@@ -756,6 +791,11 @@ async function savePicture() {
       if (error && error.name === "AbortError") return;
     }
   }
+  if (RK) {
+    // 手机和微信里下载常常不生效：弹出图片，长按即可保存；电脑上有「下载图片」按钮。
+    RK.showImage(canvas.toDataURL("image/png"), "职业六芒星.png");
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -781,6 +821,8 @@ app.addEventListener("click", (event) => {
   const name = action.dataset.action;
   if (name === "start") go(resumeStep());
   else if (name === "open") openRecord(action.dataset.id);
+  else if (name === "del") askDeleteRecord(action.dataset.id);
+  else if (name === "clear-archive") askClearArchive();
   else if (name === "save-image") savePicture();
   else if (name === "retest") {
     if (hasProgress() && !state.armReset) {
@@ -802,6 +844,7 @@ app.addEventListener("click", (event) => {
   }
 });
 
+if (RK) RK.configure({ id: "star", title: "职业六芒星" });
 load();
 if (state.step === "result") {
   animateStar = true;

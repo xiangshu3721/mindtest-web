@@ -3,6 +3,7 @@ import { formatScore, rushCheck, scoreEcr, scoredValue } from "./score.js";
 
 const app = document.querySelector("#app");
 const STORAGE = "ecr-session";
+const RK = window.ResultKit;
 const REVERSE = new Set(REVERSE_ITEMS);
 
 const state = {
@@ -107,6 +108,7 @@ function renderCover() {
     </div>
     <div class="actions">
       <button class="primary" data-action="start" type="button">开始测评</button>
+      ${RK ? RK.historyButton({ className: "ghost" }) : ""}
     </div>
     <h2>两种感觉，四种相处</h2>
     <p class="sub">回避看你对亲近和依赖紧不紧。焦虑看你会不会怕被丢下。两个分数合在一起，归到下面四种里最高的那一型。</p>
@@ -161,6 +163,34 @@ function axisNote(result) {
   const avoid = `${result.avoidance.name} ${formatScore(result.avoidance.mean)}，${result.avoidance.levelLabel}`;
   const anxiety = `${result.anxiety.name} ${formatScore(result.anxiety.mean)}，${result.anxiety.levelLabel}`;
   return `${avoid}。${anxiety}。中点是 4 分。`;
+}
+
+function summarize() {
+  const result = state.result;
+  const level = (side) => (side.level === "high" ? "high" : side.level === "low" ? "ok" : "mid");
+  const notes = [];
+  if (result.tied) notes.push("两个类型的判别分相同，并列写在上面。");
+  if (result.closeCall && !result.tied) notes.push(`第一型只比第二型高 ${formatScore(result.margin)} 分，可以当作倾向，不必当成唯一标签。`);
+  if (result.nearMidpoint) notes.push("两个均分都贴着中点，风格并不鲜明。");
+  notes.push("这是你在恋爱经历里常常有的感觉，不是对某一次吵架的结论，也不是诊断。");
+  return {
+    headline: `${result.type.name}：${result.type.short}`,
+    sub: axisNote(result),
+    metrics: [
+      ...result.dimensions.map((dimension) => ({
+        label: dimension.name,
+        value: `${formatScore(dimension.mean)} · ${dimension.levelLabel}`,
+        frac: (dimension.exactMean - 1) / 6,
+        tone: level(dimension),
+      })),
+      ...result.types.map((type) => ({ label: `判别分 · ${type.name}${type.win ? "（最高）" : ""}`, value: formatScore(type.m) })),
+    ],
+    notes,
+  };
+}
+
+function recordResult() {
+  if (RK && state.result) RK.save(summarize());
 }
 
 function renderReport() {
@@ -256,6 +286,7 @@ function renderReport() {
       <p>冷漠型 = A×7.3654621 + B×4.9392039 − 22.2281088</p>
       <p>四个数里取最高的一项。这是筛查式的自评，不是诊断。</p>
     </div>
+    ${RK ? RK.bar(summarize(), { restart: false }) : ""}
     <div class="actions">
       <button class="ghost" type="button" data-action="restart">重新测评</button>
       <button class="ghost" type="button" data-action="print">打印报告</button>
@@ -317,6 +348,7 @@ function finish() {
     return;
   }
   state.result = scoreEcr(state.answers);
+  recordResult();
   go("report");
 }
 
@@ -367,6 +399,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+if (RK) RK.configure({ id: "ecr", title: "成人依恋关系测评 ECR", onRestart: reset });
 load();
 render();
 

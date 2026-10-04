@@ -3,6 +3,7 @@ import { formatScore, rushCheck, scoreScl90 } from "./score.js";
 
 const app = document.querySelector("#app");
 const STORAGE = "scl90-session";
+const RK = window.ResultKit;
 
 const state = {
   step: "cover",
@@ -79,6 +80,35 @@ function today() {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
+function summarize() {
+  const result = state.result;
+  const profile = state.profile;
+  const tone = (level) => (level === "none" ? "ok" : level === "mild" ? "mid" : "high");
+  const notes = [];
+  if (result.crisis) notes.push(result.crisis.text);
+  result.guidance.slice(0, 3).forEach((line) => notes.push(line));
+  return {
+    headline: `${result.verdictTitle} · 总症状指数 ${formatScore(result.gsi)}（${result.gsiLabel}）`,
+    sub: result.verdictText,
+    who: [profile.name, profile.gender, profile.age].filter(Boolean).join(" "),
+    metrics: [
+      { label: "总分", value: String(result.total) },
+      { label: "阳性项目", value: `${result.positiveCount} / 90`, frac: result.positiveCount / 90, tone: result.positiveCountAboveNorm ? "high" : "ok" },
+      ...result.ranked.map((factor) => ({
+        label: factor.name,
+        value: `${formatScore(factor.mean)} · ${factor.levelLabel}`,
+        frac: (factor.mean - 1) / 4,
+        tone: tone(factor.level),
+      })),
+    ],
+    notes,
+  };
+}
+
+function recordResult() {
+  if (RK && state.result) RK.save(summarize());
+}
+
 function barPercent(score) {
   return Math.max(0, Math.min(100, ((score - 1) / 4) * 100));
 }
@@ -116,6 +146,7 @@ function renderCover() {
     </div>
     <div class="actions">
       <button class="primary" data-action="start" type="button">开始测评</button>
+      ${RK ? RK.historyButton({ className: "ghost" }) : ""}
     </div>
     <ol class="index">${index}</ol>
     <p class="fine">作答和计分都留在这台设备上，不会上传。结果用来了解最近一周的感受，不是医学诊断。</p>
@@ -313,6 +344,7 @@ function renderReport() {
       <p>因子均分 = 该因子题目得分之和 ÷ 题目数。筛查阳性：总分超过 160，或阳性项目超过 43，或九个症状因子里有均分超过 2。因子常模来自 1986 年全国正常成人样本（N=1388）。</p>
       <p>这是筛查，不是诊断，也不能代替面谈。</p>
     </div>
+    ${RK ? RK.bar(summarize(), { restart: false }) : ""}
     <div class="actions" style="margin-top:22px">
       <button class="ghost" type="button" data-action="restart">重新测评</button>
       <button class="ghost" type="button" data-action="print">打印报告</button>
@@ -367,7 +399,22 @@ function finish() {
     go("rush");
     return;
   }
+  recordResult();
   go("report");
+}
+
+function restart() {
+  sessionStorage.removeItem(STORAGE);
+  state.step = "cover";
+  state.profile = { name: "", gender: "", age: "" };
+  state.index = 0;
+  state.answers = Array(QUESTIONS.length).fill(null);
+  state.times = Array(QUESTIONS.length).fill(null);
+  state.result = null;
+  state.rushed = false;
+  state.error = "";
+  render();
+  window.scrollTo(0, 0);
 }
 
 app.addEventListener("click", (event) => {
@@ -428,21 +475,10 @@ app.addEventListener("click", (event) => {
   if (action === "force-report") {
     state.rushed = true;
     state.result = scoreScl90(state.answers);
+    recordResult();
     go("report");
   }
-  if (action === "restart") {
-    sessionStorage.removeItem(STORAGE);
-    state.step = "cover";
-    state.profile = { name: "", gender: "", age: "" };
-    state.index = 0;
-    state.answers = Array(QUESTIONS.length).fill(null);
-    state.times = Array(QUESTIONS.length).fill(null);
-    state.result = null;
-    state.rushed = false;
-    state.error = "";
-    render();
-    window.scrollTo(0, 0);
-  }
+  if (action === "restart") restart();
   if (action === "print") window.print();
 });
 
@@ -463,6 +499,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+if (RK) RK.configure({ id: "scl90", title: "SCL-90 症状自评量表", onRestart: restart });
 load();
 render();
 
