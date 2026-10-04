@@ -438,7 +438,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-if (RK) RK.configure({ id: "pdq4", title: "人格障碍筛查 PDQ-4", onRestart: restart, capture: () => RK.capture(app.querySelector(".sheet") || app, { skip: ".actions" }) });
+if (RK) RK.configure({ id: "pdq4", start: ["[data-action=start]", "[data-action=resume]"], title: "人格障碍筛查 PDQ-4", onRestart: restart, capture: () => RK.capture(app.querySelector(".sheet") || app, { skip: ".actions" }) });
 load();
 render();
 

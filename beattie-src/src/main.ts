@@ -221,14 +221,14 @@ function renderTest(test: QuizTest) {
   // sanitize lengths
   if (draft.likert.length !== test.likertItems.length) draft = emptyDraft(test);
 
-  if (RK) RK.configure({ id: 'beattie-' + test.id, title: test.title });
+  if (RK) RK.configure({ id: 'beattie-' + test.id, title: test.title, start: [{ sel: '[data-accept]', host: '.sticky-bar' }] });
   const persist = () => saveDraft(test.id, draft);
   let saveOk: boolean | null = null; // null = 这次没有交卷（刷新后回到结果页）
   let finishedEntry: ArchiveEntry | null = null;
 
   const paint = () => {
     // 昵称门槛：直接打开这套题的链接、刷新后恢复进度、点「重做」，只要还没确认过昵称，就先补录；点「返回」回首页。
-    if (RK) RK.guard(draft.step !== 'result', () => go(''));
+    if (RK) RK.guard(draft.step !== 'result' && draft.step !== 'warning', () => go(''));
     const pct = progressPct(draft.step, test);
     let body = '';
 

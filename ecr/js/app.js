@@ -405,7 +405,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-if (RK) RK.configure({ id: "ecr", title: "成人依恋关系测评 ECR", onRestart: reset, capture: () => RK.capture(app.querySelector(".sheet") || app, { skip: ".actions" }) });
+if (RK) RK.configure({ id: "ecr", start: ["[data-action=start]", "[data-action=resume]"], title: "成人依恋关系测评 ECR", onRestart: reset, capture: () => RK.capture(app.querySelector(".sheet") || app, { skip: ".actions" }) });
 load();
 render();
 

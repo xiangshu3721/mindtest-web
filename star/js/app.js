@@ -623,7 +623,7 @@ function captureStar() {
   return sections;
 }
 
-if (RK) RK.configure({ id: "star", title: "职业六芒星", onRestart: startOver, capture: captureStar });
+if (RK) RK.configure({ id: "star", start: ["[data-action=start]", "[data-action=resume]"], title: "职业六芒星", onRestart: startOver, capture: captureStar });
 migrateOldArchive();
 load();
 if (state.step === "result") {
