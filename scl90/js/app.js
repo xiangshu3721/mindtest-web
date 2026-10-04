@@ -504,7 +504,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-if (RK) RK.configure({ id: "scl90", title: "SCL-90 症状自评量表", onRestart: restart, capture: () => RK.capture(app.querySelector(".sheet") || app, { skip: ".actions" }) });
+if (RK) RK.configure({ id: "scl90", start: ["[data-action=start]", "[data-action=resume]"], title: "SCL-90 症状自评量表", onRestart: restart, capture: () => RK.capture(app.querySelector(".sheet") || app, { skip: ".actions" }) });
 load();
 render();
 
