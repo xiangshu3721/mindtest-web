@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>测评报告导入原型</title>
+    <link rel="stylesheet" href="../r/report.css?v=cloud1" />
+  </head>
+  <body>
+    <main class="frame">
+      <article class="sheet">
+        <h1>从测评报告导入</h1>
+        <p class="read-note">这是本地原型。它只读取隔离环境里的报告，确认后只把「客户归档状态」改成已归档。不创建飞书表，不改客户事实字段，也不按昵称自动对上客户。</p>
+        <label>报告链接<br /><textarea id="link" rows="3" style="width:100%"></textarea></label>
+        <label>集成密钥（只在这次页面里使用，不会写进仓库）<br /><input id="key" type="password" autocomplete="off" style="width:100%" /></label>
+        <label>客户 ID（手选，必填）<br /><input id="customer" style="width:100%" /></label>
+        <div class="sc-actions" style="display:flex;gap:8px;margin-top:12px">
+          <button id="preview" class="retry" type="button">读取预览</button>
+          <button id="confirm" class="retry" type="button">确认归档</button>
+        </div>
+        <pre id="out" class="read-note"></pre>
+      </article>
+    </main>
+    <script type="module" src="./asva-import-preview.js?v=cloud1"></script>
+  </body>
+</html>

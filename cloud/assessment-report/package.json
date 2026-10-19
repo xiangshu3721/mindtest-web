@@ -1,0 +1,6 @@
+{
+  "name": "assessment-report-dev",
+  "private": true,
+  "type": "module",
+  "description": "职业六芒星报告的隔离 HTTP 服务。默认不部署。"
+}

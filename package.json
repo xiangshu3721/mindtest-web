@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test ecr/js/score.test.mjs"
+    "test": "node --test ecr/js/score.test.mjs scl90/js/score.test.mjs pdq/js/score.test.mjs star/js/cloud-payload.test.mjs js/cloud-client.test.mjs cloud/assessment-report/handler.test.mjs"
   }
 }
