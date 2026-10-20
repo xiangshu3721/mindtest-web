@@ -1,6 +1,6 @@
 # 职业六芒星云端存档 V1.0 第一期交付
 
-状态：隔离存储改为环境里的 PostgreSQL 表 `assessment_reports_dev`。本地测试通过。没有合并 `main`，没有创建飞书表，没有在本环境执行 `tcb deploy`，没有写入数据库。飞书写入保持 `off`。
+状态：隔离存储是环境里的 PostgreSQL 表 `assessment_reports_dev`。操作者已用合成数据打通 CloudBase 闭环。本代理没有执行 `tcb deploy`，没有合并 `main`，没有创建飞书表，没有把飞书改成 `live`。上线前清单见 `ACCEPTANCE.md`。
 
 ## 1. 已完成功能
 
@@ -16,7 +16,7 @@
 - 断网时结果页仍在，队列保留同一次提交，恢复后可再试
 - 管理员接口在集成密钥和链接秘密都正确时读取全文；人工填写客户 ID 后，只把「客户归档状态」改为已归档，不按昵称合并，不改客户事实字段
 
-飞书镜像代码按下面的字段写好了，默认关闭。`mock` 模式只写在进程内存里，用来验证同一报告 ID 不新增第二行，以及镜像失败后重试。
+飞书镜像按下面的字段写好了，默认关闭。`mock` 模式只写在进程内存里。真实写入器按「报告 ID」先查再更新，没有记录才新建。CloudBase 已写入、飞书写入失败时，报告标成「待重试」；受保护的补偿入口可以再试，成功后同一报告 ID 仍只有一行。这一轮线上保持 `off`。
 
 六芒星没有分数。维度是 `kind: "category"`，`score` 为 `null`。
 
@@ -34,7 +34,7 @@
 | `js/report-render.js`、`js/report-page.js`、`r/index.html` | 独立阅读页 |
 | `cloud/assessment-report/` | 隔离 HTTP 服务。本地默认内存库；云上写入 PostgreSQL 表。飞书默认关闭 |
 | `tools/asva-import-preview.html` | 本地导入原型，不进首页 |
-| `docs/assessment-cloud-v1/` | 本说明和协议 schema |
+| `docs/assessment-cloud-v1/` | 本说明、协议 schema、飞书权限、真机验收、上线回滚、验收清单 |
 
 ## 3. PostgreSQL 表与隔离
 
@@ -131,9 +131,11 @@ tcb fn deploy assessmentReportDev --httpFn --path /assessment-report-dev --dir .
 
 表名：`ASVA 测评记录`。
 
-意向位置：现有 ASVA Base。`table_id` 用环境变量 `FEISHU_ASSESSMENT_TABLE_ID`，当前为空。写入开关 `FEISHU_INDEX_MODE` 默认 `off`。`live` 还要 `FEISHU_INDEX_LIVE_CONFIRM=YES`，并且本仓库没有打包飞书 HTTP 客户端，没有注入 writer 时不会发请求。
+位置：独立 Base「ASVA 测评数据」。现在还没有用户提供的 Base 链接，也没有 `table_id`。`table_id` 用环境变量 `FEISHU_ASSESSMENT_TABLE_ID`，当前为空。写入开关 `FEISHU_INDEX_MODE` 默认 `off`。
 
-不使用生活小调查的妙搭 webhook。ASVA 现用飞书应用是 `cli_aaff6cb53db89bd3`（与解忧小屋同一应用，见 `asva-workbench` 的 `.env.example`）。小调查应用 `cli_aa3e5840a3f89d2b` 不用于测评。
+仓库里有可注入的飞书 HTTP writer：按「报告 ID」查询，已有记录就更新第一条，没有记录才新建。`live` 要同时有 `FEISHU_INDEX_LIVE_CONFIRM=YES`、表 ID、应用 ID、应用密钥和 `FEISHU_APP_TOKEN`。缺任何一项时进程拒绝以 live 启动，也不会发请求。凭证不进 Git。这一轮 `cloudbaserc.json` 仍是 `off`，不要在线上改成 `live`。
+
+不使用生活小调查的妙搭 webhook。ASVA 现用飞书应用是 `cli_aaff6cb53db89bd3`（与解忧小屋同一应用）。小调查应用 `cli_aa3e5840a3f89d2b` 不用于测评。
 
 报告 ID 的唯一性由 PostgreSQL 主键 `report_id` 保证，不靠飞书文本字段的唯一属性。
 
@@ -162,24 +164,25 @@ tcb fn deploy assessmentReportDev --httpFn --path /assessment-report-dev --dir .
 
 报告状态和客户归档状态分开。撤销只把报告状态改为已撤销，归档状态保持原值。归档只在人工指定客户 ID 之后改为已归档，不自动撤销链接。
 
-### 建表前的访问权限：现在还不能证明能限制住
+### 建表前的访问权限
 
-这张表如果放进现有 ASVA Base，同一 Base 里已经有客户、预约、服务记录等数据。飞书的隐藏视图只是默认不展示，有 Base 权限的人仍然可以打开表、改视图或导出。这不等于访问控制。
+表不放进已有客户资料的 ASVA Base。用户已定为独立 Base「ASVA 测评数据」。隐藏视图只是默认不展示，不算访问控制。谁可管、可编、可阅读，应用如何独占读写，普通协作者为什么不能读和导出，以及用人点一次的验证步骤，写在 `FEISHU_ACL.md`。
 
-正式建表前必须在飞书里核对，并写进建表记录：
+在那份清单打勾、并且用户给出 Base 链接之前，不创建「ASVA 测评记录」，不把线上开关改成 `live`。字段形状可以先在本机看，它不会请求飞书：
 
-1. 谁拥有这个 Base 的可管理、可编辑、可阅读权限。导师、群成员、外部协作者是否在内。
-2. 高级权限是否能把「ASVA 测评记录」限制到只有管理员应用 `cli_aaff6cb53db89bd3` 可读写，其他人不可读、不可导出。
-3. 应用的 `tenant_access_token` 是否会让服务端读到全表。服务端日志仍只记 reportId、测评 ID、状态码和耗时。
-4. 导出、自动化和群机器人是否会被这张表触发。不要把索引转发到群。
+```bash
+node cloud/assessment-report/feishu-synthetic.mjs
+```
 
-本轮没有飞书管理员令牌，没有读取 Base 的成员和高级权限，所以不能证明「放进现有 Base 是安全的」。若上面第 2 点做不到，就改用一个单独的、只授权给该应用的 Base。不要用隐藏视图代替权限。
+### 补偿重试
 
-在这次核对完成之前，不创建「ASVA 测评记录」。
+PostgreSQL 写入成功、飞书失败时，文档的 `feishuSync` 是「待重试」。同一提交号再提交会再试一次。另外有 `POST /v1/integrations/feishu/retry`，正文 `{}`。它要健康检查里的 `deployed: true`，还要 `Authorization: Bearer <ASVA_REPORT_IMPORT_KEY>`。缺一项返回 404，响应里没有分享秘密。它只扫「待重试」，成功后按报告 ID 覆盖，不新建第二行。满 8 次标成「失败」的记录不会被这个入口自动再扫。页面不链到这个地址。
+
+真机和微信步骤见 `E2E_BROWSER_WECHAT.md`。上线和回滚见 `GO_LIVE_ROLLBACK.md`。三栏验收见 `ACCEPTANCE.md`。
 
 ## 5. H5 测试地址
 
-没有部署到 GitHub Pages，也没有部署到 CloudBase，所以没有线上测试地址。
+隔离函数已由操作者部署，合成闭环已通过。公开基址是上面的 `/assessment-report-dev`。GitHub Pages 还没有这份前端：分支未合并，线上作答页还不会调用这个 endpoint。阅读页地址要等发布后才是 `https://xiangshu3721.github.io/mindtest-web/r/#rpt_<id>.<secret>`。未经用户同意不合并、不发布。
 
 本地隔离服务：
 
@@ -225,15 +228,15 @@ https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.c
 npm test
 ```
 
-覆盖：ECR、SCL-90、PDQ-4 原有计分测试；六芒星协议不含分数；未同意不提交；同一提交号幂等与冲突；换词序产生新报告且旧链接不变；错误秘密与不存在都是 404；撤销后 410 且正文没有词；飞书默认关闭；mock 镜像失败、重试、同一报告 ID 不新增行；撤销不改变归档状态；多次失败后标记失败但报告仍可读取；live 未确认时不调用 writer；管理员缺密钥为 404；归档必须手填客户 ID，重复归档不新增，不按昵称合并；超限 429、过大 413、错误来源 403；其他测评页面没有引用云端块。PostgreSQL 驱动用 mock 覆盖插入幂等、唯一键冲突、更新，以及表不存在时返回建表 SQL。没有云函数身份时不会去连真实环境。部署入口在确认开关打开后拒绝内存库和飞书 live。词表快照与 `star/js/data.js` 一致。
+覆盖：ECR、SCL-90、PDQ-4 原有计分测试；六芒星协议不含分数；未同意不提交；同一提交号幂等与冲突；换词序产生新报告且旧链接不变；错误秘密与不存在都是 404；撤销后 410 且正文没有词；飞书默认关闭；mock 镜像失败、重试、同一报告 ID 不新增行；CloudBase 已写入而飞书连续失败时保持「待重试」，补偿入口在未部署或无密钥时 404，补写成功后同一报告 ID 只有一行；writer 用假接口按报告 ID 更新，查询到多条时只更新第一条、不再新建；撤销不改变归档状态；多次失败后标记失败但报告仍可读取；live 未确认时不调用 writer；管理员缺密钥为 404；归档必须手填客户 ID，重复归档不新增，不按昵称合并；超限 429、过大 413、错误来源 403；其他测评页面没有引用云端块。PostgreSQL 驱动用 mock 覆盖插入幂等、唯一键冲突、更新，以及表不存在时返回建表 SQL。没有云函数身份时不会去连真实环境。部署入口在确认开关打开后拒绝内存库；飞书 live 缺凭证时拒绝启动，凭证齐全才允许监听。这一轮配置仍是 off。词表快照与 `star/js/data.js` 一致。这些测试都不请求 `open.feishu.cn`。
 
-浏览器里用合成的六芒星结果走通了：不勾选不请求、断网后再试仍是同一份、H5 读到同一组词、撤销后只剩失效页。ECR 页面没有这块同意。
+浏览器里用合成的六芒星结果走通过本地服务：不勾选不请求、断网后再试仍是同一份、H5 读到同一组词、撤销后只剩失效页。ECR 页面没有这块同意。这不是真机，也不是微信内。
 
 遗留，本轮不做：
 
-- 真微信里打开和转发
-- 真飞书建表与写入。飞书保持 off
-- Mac 上在 SQL 数据库执行建表 SQL、执行 `tcb fn deploy`、用 curl 做真实闭环。本环境没有代替执行
+- 真机浏览器和微信内打开、转发。步骤在 `E2E_BROWSER_WECHAT.md`，还没走
+- 真飞书建表与写入。还没有「ASVA 测评数据」的链接。飞书保持 off
+- 合并 `main`、发布 GitHub Pages。未经用户同意不做
 - 生产 ASVA 工作台改动
 - 其他 12 个测评接入
 

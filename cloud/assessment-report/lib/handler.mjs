@@ -168,6 +168,17 @@ export function createHandler(options) {
     return updated;
   }
 
+  async function retryRoute(headers) {
+    if (options.deployed !== true || !authorized(headers)) return finish(404, { error: "not_found" });
+    const updated = await retryMirrors();
+    return finish(200, {
+      retried: updated.length,
+      synced: updated.filter((doc) => doc && doc.feishuSync === "已同步").length,
+      pending: updated.filter((doc) => doc && doc.feishuSync === "待重试").length,
+      failed: updated.filter((doc) => doc && doc.feishuSync === "失败").length,
+    });
+  }
+
   function responseFor(doc, linkSecret, ownerToken) {
     return {
       reportId: doc.reportId,
@@ -294,9 +305,15 @@ export function createHandler(options) {
       "POST /v1/results/revoke": revoke,
       "POST /v1/integrations/asva/read": (body) => adminRead(body, headers),
       "POST /v1/integrations/asva/archive": (body) => archive(body, headers),
+      "POST /v1/integrations/feishu/retry": () => retryRoute(headers),
     };
     const route = routes[`${method} ${path}`];
     if (!route) {
+      const response = finish(404, { error: "not_found" }, { origin });
+      log({ status: 404, ms: Date.now() - started });
+      return withCors(response, origin, allowedOrigins);
+    }
+    if (path === "/v1/integrations/feishu/retry" && (options.deployed !== true || !authorized(headers))) {
       const response = finish(404, { error: "not_found" }, { origin });
       log({ status: 404, ms: Date.now() - started });
       return withCors(response, origin, allowedOrigins);

@@ -53,7 +53,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS assessment_reports_dev_source_submission_id_ui
 
 同一份声明在本目录 `cloudbaserc.json` 的 `envVariables`。其中没有密钥。
 
-`FEISHU_INDEX_MODE=live` 时进程直接退出。部署就用 `off`。
+这一轮 `FEISHU_INDEX_MODE` 保持 `off`。不要在函数上改成 `live`，也不要创建飞书表。
+
+`live` 只有在同时具备 `FEISHU_INDEX_LIVE_CONFIRM=YES`、`FEISHU_ASSESSMENT_TABLE_ID`、`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_APP_TOKEN` 时才会监听。缺任何一项，进程退出，避免半套配置去连飞书。这些值只放函数环境变量，不进 Git。表要建在独立 Base「ASVA 测评数据」，权限核对见 `docs/assessment-cloud-v1/FEISHU_ACL.md`。
+
+补偿入口是 `POST /v1/integrations/feishu/retry`，正文用 `{}`。它要求 `ASSESSMENT_DEPLOY_CONFIRM=dev-isolated`（健康检查里 `deployed: true`）并且 `Authorization: Bearer <ASVA_REPORT_IMPORT_KEY>`。缺一项就是 404，页面上没有这个入口。返回只有 `retried`、`synced`、`pending`、`failed` 四个数字。它只重试「待重试」，按报告 ID 覆盖同一行，不给已标「失败」的记录自动再试。上线顺序、回滚和验收清单在 `docs/assessment-cloud-v1/GO_LIVE_ROLLBACK.md` 与 `ACCEPTANCE.md`。
 
 ### 鉴权
 

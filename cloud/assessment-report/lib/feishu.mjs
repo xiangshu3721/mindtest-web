@@ -1,8 +1,13 @@
 /**
  * 「ASVA 测评记录」镜像。默认关闭，不访问飞书。
- * CloudBase 文档是准的。这里只是可重试的镜像，失败与否不能靠飞书里有没有行来判断。
- * 不建表、不调用妙搭 webhook。live 没有确认开关、表 ID 和注入的 writer 时直接停下。
+ * PostgreSQL 里的报告是准的。这里只是可重试的镜像，失败与否不能靠飞书里有没有行来判断。
+ * 不建表、不调用妙搭 webhook。
+ * live 要同时有 YES 确认、表 ID、应用凭证和 Base token，才会按「报告 ID」查找后更新或新建。
  */
+
+export const FEISHU_APP_ID = "cli_aaff6cb53db89bd3";
+export const BASE_NAME = "ASVA 测评数据";
+const FEISHU_OPEN = "https://open.feishu.cn/open-apis";
 
 export const TABLE_NAME = "ASVA 测评记录";
 export const MIRROR_FIELDS = [
@@ -55,14 +60,110 @@ export function indexRow(doc) {
   return row;
 }
 
+export function feishuLiveReady(env = {}) {
+  return env.FEISHU_INDEX_MODE === "live"
+    && env.FEISHU_INDEX_LIVE_CONFIRM === "YES"
+    && Boolean(String(env.FEISHU_ASSESSMENT_TABLE_ID || "").trim())
+    && Boolean(String(env.FEISHU_APP_ID || "").trim())
+    && Boolean(String(env.FEISHU_APP_SECRET || "").trim())
+    && Boolean(String(env.FEISHU_APP_TOKEN || "").trim());
+}
+
+function feishuFields(row) {
+  const fields = { ...row };
+  for (const key of ["完成时间", "创建时间"]) {
+    const ms = Date.parse(fields[key]);
+    if (!Number.isFinite(ms)) throw new Error(`飞书时间字段无法解析：${key}`);
+    fields[key] = ms;
+  }
+  fields["报告字节数"] = Number(fields["报告字节数"]);
+  return fields;
+}
+
+async function readJson(response) {
+  return response.json();
+}
+
+export function createFeishuHttpWriter(env, fetchImpl = globalThis.fetch) {
+  const appId = String(env.FEISHU_APP_ID || "").trim();
+  const appSecret = String(env.FEISHU_APP_SECRET || "").trim();
+  const appToken = String(env.FEISHU_APP_TOKEN || "").trim();
+  if (!appId || !appSecret || !appToken) throw new Error("飞书应用凭证不齐");
+  let token = "";
+  let tokenUntil = 0;
+
+  async function tenantToken(now = Date.now()) {
+    if (token && now < tokenUntil) return token;
+    const response = await fetchImpl(`${FEISHU_OPEN}/auth/v3/tenant_access_token/internal`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+    });
+    const body = await readJson(response);
+    if (!body || body.code !== 0 || !body.tenant_access_token) throw new Error("飞书令牌失败");
+    token = body.tenant_access_token;
+    const expire = Number(body.expire) || 7200;
+    tokenUntil = now + Math.max(60, expire - 120) * 1000;
+    return token;
+  }
+
+  return async function write({ tableId, row }) {
+    const access = await tenantToken();
+    const base = `${FEISHU_OPEN}/bitable/v1/apps/${encodeURIComponent(appToken)}/tables/${encodeURIComponent(tableId)}`;
+    const headers = { "content-type": "application/json", authorization: `Bearer ${access}` };
+    const reportId = row["报告 ID"];
+    const search = await fetchImpl(`${base}/records/search`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        page_size: 5,
+        filter: {
+          conjunction: "and",
+          conditions: [{ field_name: "报告 ID", operator: "is", value: [reportId] }],
+        },
+      }),
+    });
+    const found = await readJson(search);
+    if (!found || found.code !== 0) throw new Error("飞书查询失败");
+    const items = (found.data && found.data.items) || [];
+    const fields = feishuFields(row);
+    if (items.length) {
+      const recordId = items[0].record_id;
+      const updated = await fetchImpl(`${base}/records/${encodeURIComponent(recordId)}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ fields }),
+      });
+      const body = await readJson(updated);
+      if (!body || body.code !== 0) throw new Error("飞书更新失败");
+      return { action: "update", recordId, matches: items.length };
+    }
+    const created = await fetchImpl(`${base}/records`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ fields }),
+    });
+    const body = await readJson(created);
+    if (!body || body.code !== 0) throw new Error("飞书新建失败");
+    const recordId = body.data && body.data.record && body.data.record.record_id;
+    return { action: "create", recordId, matches: 0 };
+  };
+}
+
 export function createFeishuIndex(env = {}, writer = null) {
   const rows = [];
   const mode = env.FEISHU_INDEX_MODE || "off";
   let failTimes = Number(env.failTimes || 0);
+  const liveWriter = typeof writer === "function"
+    ? writer
+    : (mode === "live" && env.FEISHU_APP_ID && env.FEISHU_APP_SECRET && env.FEISHU_APP_TOKEN
+      ? createFeishuHttpWriter(env)
+      : null);
 
   return {
     mode,
     tableName: TABLE_NAME,
+    baseName: BASE_NAME,
     rows,
     failNext(times) {
       failTimes += times;
@@ -71,9 +172,9 @@ export function createFeishuIndex(env = {}, writer = null) {
       if (mode === "off") return "off";
       if (mode === "live") {
         const confirmed = env.FEISHU_INDEX_LIVE_CONFIRM === "YES";
-        const tableId = String(env.FEISHU_ASSESSMENT_TABLE_ID || "");
-        if (!confirmed || !tableId || typeof writer !== "function") return "blocked";
-        await writer({ tableId, tableName: TABLE_NAME, row });
+        const tableId = String(env.FEISHU_ASSESSMENT_TABLE_ID || "").trim();
+        if (!confirmed || !tableId || typeof liveWriter !== "function") return "blocked";
+        await liveWriter({ tableId, tableName: TABLE_NAME, row });
         return "ok";
       }
       if (failTimes > 0) {

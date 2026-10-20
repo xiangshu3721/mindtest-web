@@ -5,7 +5,7 @@ import { WORDS } from "../../star/js/data.js";
 import { buildStarResult } from "../../star/js/cloud-payload.js";
 import { createHandler } from "./lib/handler.mjs";
 import { createCloudBaseStore, createMemoryStore, tableSql } from "./lib/store.mjs";
-import { createFeishuIndex, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
+import { createFeishuHttpWriter, createFeishuIndex, feishuLiveReady, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
 import { assertDevCollection, randomSecret } from "./lib/ids.mjs";
 import { buildImportDraft } from "./lib/import-draft.mjs";
 import { deployBlockReason } from "./index.mjs";
@@ -44,6 +44,7 @@ function app(options = {}) {
     feishu,
     importKey: "test-import-key",
     publicReportBase: "http://127.0.0.1:4173/r/",
+    deployed: options.deployed === true,
     silent: true,
   });
   return { ...handler, feishu };
@@ -208,6 +209,139 @@ test("飞书 live 未确认时不调用 writer，报告仍在", async () => {
   assert.equal(created.status, 200);
   assert.equal(created.body.index, "待重试");
   assert.equal(called, 0);
+});
+
+test("报告已入库后飞书连续失败保持待重试，补偿成功后同一报告只有一行", async () => {
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock", failTimes: 2 });
+  const { handle, store } = app({ feishu, deployed: true });
+  const made = result();
+  const created = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  }, { ip: "203.0.113.70" });
+  assert.equal(created.status, 200);
+  assert.equal(created.body.index, "待重试");
+  assert.equal((await store.getByReportId(made.reportId)).feishuSync, "待重试");
+  assert.equal(feishu.rows.length, 0);
+  const readable = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  }, { ip: "203.0.113.71" });
+  assert.equal(readable.status, 200);
+
+  const hidden = await post({ handle }, "/v1/integrations/feishu/retry", {}, { ip: "203.0.113.72" });
+  assert.equal(hidden.status, 404);
+  const garbage = await handle({
+    method: "POST",
+    path: "/v1/integrations/feishu/retry",
+    headers: {},
+    rawBody: "not-json",
+    ip: "203.0.113.72",
+    now: 1_000,
+  });
+  assert.equal(garbage.status, 404);
+  const closed = app({ feishu, deployed: false });
+  const locked = await post(closed, "/v1/integrations/feishu/retry", {}, {
+    headers: { authorization: "Bearer test-import-key" },
+    ip: "203.0.113.73",
+  });
+  assert.equal(locked.status, 404);
+
+  const still = await post({ handle }, "/v1/integrations/feishu/retry", {}, {
+    headers: { authorization: "Bearer test-import-key" },
+    ip: "203.0.113.74",
+  });
+  assert.equal(still.status, 200);
+  assert.equal(still.body.pending, 1);
+  assert.equal(feishu.rows.length, 0);
+  assert.equal((await store.getByReportId(made.reportId)).feishuSync, "待重试");
+
+  const done = await post({ handle }, "/v1/integrations/feishu/retry", {}, {
+    headers: { authorization: "Bearer test-import-key" },
+    ip: "203.0.113.75",
+  });
+  assert.equal(done.status, 200);
+  assert.equal(done.body.synced, 1);
+  assert.equal(done.body.retried, 1);
+  assert.equal(feishu.rows.length, 1);
+  assert.equal(feishu.rows[0]["报告 ID"], made.reportId);
+  assert.equal(JSON.stringify(done.body).includes(made.linkSecret), false);
+  assert.equal((await store.getByReportId(made.reportId)).feishuSync, "已同步");
+
+  const idle = await post({ handle }, "/v1/integrations/feishu/retry", {}, {
+    headers: { authorization: "Bearer test-import-key" },
+    ip: "203.0.113.76",
+  });
+  assert.equal(idle.body.retried, 0);
+  assert.equal(feishu.rows.length, 1);
+});
+
+test("飞书 writer 按报告 ID 更新，不新建第二行", async () => {
+  const records = [];
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, method: init.method, body });
+    if (url.endsWith("/tenant_access_token/internal")) {
+      assert.equal(body.app_secret, "test-secret");
+      return { json: async () => ({ code: 0, tenant_access_token: "token-1", expire: 7200 }) };
+    }
+    if (url.endsWith("/records/search")) {
+      return { json: async () => ({ code: 0, data: { items: records.map((item) => ({ record_id: item.id, fields: item.fields })) } }) };
+    }
+    if (init.method === "POST" && url.endsWith("/records")) {
+      records.push({ id: "rec_1", fields: body.fields });
+      return { json: async () => ({ code: 0, data: { record: { record_id: "rec_1" } } }) };
+    }
+    if (init.method === "PUT") {
+      records[0].fields = body.fields;
+      return { json: async () => ({ code: 0, data: { record: { record_id: "rec_1" } } }) };
+    }
+    throw new Error(url);
+  };
+  const env = {
+    FEISHU_APP_ID: "cli_aaff6cb53db89bd3",
+    FEISHU_APP_SECRET: "test-secret",
+    FEISHU_APP_TOKEN: "bascnTEST",
+  };
+  const writer = createFeishuHttpWriter(env, fetchImpl);
+  const feishu = createFeishuIndex({
+    FEISHU_INDEX_MODE: "live",
+    FEISHU_INDEX_LIVE_CONFIRM: "YES",
+    FEISHU_ASSESSMENT_TABLE_ID: "tblTEST",
+    ...env,
+  }, writer);
+  const row = {
+    "报告 ID": "rpt_abcdefghijklmnopqrst",
+    "客户昵称": "小林",
+    "测评 ID": "star",
+    "测评名称": "职业六芒星",
+    "完成时间": "2026-10-20T12:00:00+08:00",
+    "核心结果摘要": "底层动力：自由",
+    "来源": "站内合集",
+    "关联客户 ID": "",
+    "报告状态": "有效",
+    "客户归档状态": "未归档",
+    "同步状态": "已同步",
+    "来源导师 ID": "",
+    "来源活动": "",
+    "记录版本": "1.0.0",
+    "报告字节数": 3072,
+    "创建时间": "2026-10-20T04:00:00.000Z",
+  };
+  assert.equal(await feishu.upsert(row), "ok");
+  row["报告状态"] = "已撤销";
+  assert.equal(await feishu.upsert(row), "ok");
+  assert.equal(records.length, 1);
+  assert.equal(records[0].fields["报告状态"], "已撤销");
+  assert.equal(typeof records[0].fields["完成时间"], "number");
+  assert.equal(calls.filter((call) => call.method === "POST" && call.url.endsWith("/records")).length, 1);
+  assert.equal(calls.filter((call) => call.method === "PUT").length, 1);
+  records.push({ id: "rec_dup", fields: { ...records[0].fields } });
+  assert.equal(await feishu.upsert(row), "ok");
+  assert.equal(calls.filter((call) => call.method === "POST" && call.url.endsWith("/records")).length, 1);
+  assert.equal(calls.filter((call) => call.method === "PUT").length, 2);
+  assert.equal(calls.filter((call) => call.method === "PUT").at(-1).url.endsWith("/records/rec_1"), true);
+  assert.equal(JSON.stringify(records).includes("link-secret"), false);
+  assert.equal(feishuLiveReady({ FEISHU_INDEX_MODE: "live" }), false);
 });
 
 test("多次镜像失败后标失败，但报告还在", async () => {
@@ -559,6 +693,17 @@ test("部署入口在确认开关打开时才允许监听，且拒绝内存库�
     ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
     FEISHU_INDEX_MODE: "live",
   }), "feishu-live");
+  assert.equal(deployBlockReason({
+    ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
+    ASSESSMENT_STORE_DRIVER: "postgres",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+    FEISHU_INDEX_MODE: "live",
+    FEISHU_INDEX_LIVE_CONFIRM: "YES",
+    FEISHU_ASSESSMENT_TABLE_ID: "tblTEST",
+    FEISHU_APP_ID: "cli_aaff6cb53db89bd3",
+    FEISHU_APP_SECRET: "test-secret",
+    FEISHU_APP_TOKEN: "bascnTEST",
+  }), "");
   assert.equal(deployBlockReason({
     ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
     ASSESSMENT_STORE_DRIVER: "postgres",

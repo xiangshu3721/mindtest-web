@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { startLocalServer } from "./local-server.mjs";
 import { assertDevCollection } from "./lib/ids.mjs";
 import { isCloudStoreDriver } from "./lib/store.mjs";
+import { feishuLiveReady } from "./lib/feishu.mjs";
 
 export function deployBlockReason(env = process.env) {
   assertDevCollection(env.ASSESSMENT_COLLECTION || "assessment_reports_dev");
@@ -15,7 +16,7 @@ export function deployBlockReason(env = process.env) {
   if (!isCloudStoreDriver(env.ASSESSMENT_STORE_DRIVER) || env.ASSESSMENT_CLOUDBASE_WRITE_CONFIRM !== "dev-isolated") {
     return "memory";
   }
-  if (env.FEISHU_INDEX_MODE === "live") return "feishu-live";
+  if (env.FEISHU_INDEX_MODE === "live" && !feishuLiveReady(env)) return "feishu-live";
   return "";
 }
 
@@ -32,7 +33,7 @@ if (isEntry) {
     process.exit(1);
   }
   if (reason === "feishu-live") {
-    console.error("assessmentReportDev 拒绝启动：FEISHU_INDEX_MODE=live。这一期飞书保持 off，不建表。");
+    console.error("assessmentReportDev 拒绝启动：FEISHU_INDEX_MODE=live 但确认、表 ID 或应用凭证不齐。线上保持 off。");
     process.exit(1);
   }
   try {
