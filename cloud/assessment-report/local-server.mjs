@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHandler } from "./lib/handler.mjs";
-import { createMemoryStore } from "./lib/store.mjs";
+import { createCloudBaseStore, createMemoryStore } from "./lib/store.mjs";
 import { createFeishuIndex } from "./lib/feishu.mjs";
 import { assertDevCollection } from "./lib/ids.mjs";
 
@@ -13,9 +13,25 @@ const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 4173);
 const collection = assertDevCollection(process.env.ASSESSMENT_COLLECTION || "assessment_reports_dev");
 
-function makeHandler(host, port) {
+export function normalizeRequestPath(pathname) {
+  const pathOnly = String(pathname || "/").split("?")[0];
+  const prefix = "/assessmentReportDev";
+  if (pathOnly === prefix) return "/";
+  if (pathOnly.startsWith(`${prefix}/`)) return pathOnly.slice(prefix.length) || "/";
+  return pathOnly;
+}
+
+async function openStore() {
+  if (process.env.ASSESSMENT_STORE_DRIVER === "cloudbase") {
+    return createCloudBaseStore(process.env);
+  }
+  return createMemoryStore(collection);
+}
+
+function makeHandler(host, port, store, deployed) {
   return createHandler({
-    store: createMemoryStore(collection),
+    store,
+    deployed,
     feishu: createFeishuIndex({
       FEISHU_INDEX_MODE: process.env.FEISHU_INDEX_MODE || "off",
       FEISHU_ASSESSMENT_TABLE_ID: process.env.FEISHU_ASSESSMENT_TABLE_ID || "",
@@ -63,17 +79,20 @@ function sendJson(res, response) {
   res.end(raw);
 }
 
-export function startLocalServer({ host = HOST, port = PORT } = {}) {
-  const handler = makeHandler(host, port);
+export async function startLocalServer({ host = HOST, port = PORT } = {}) {
+  const store = await openStore();
+  const deployed = process.env.ASSESSMENT_DEPLOY_CONFIRM === "dev-isolated";
+  const handler = makeHandler(host, port, store, deployed);
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://${host}:${port}`);
-    if (url.pathname.startsWith("/v1/") || url.pathname === "/health") {
+    const pathname = normalizeRequestPath(url.pathname);
+    if (pathname.startsWith("/v1/") || pathname === "/health") {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
       const rawBody = Buffer.concat(chunks).toString("utf8");
       const response = await handler.handle({
         method: req.method,
-        path: url.pathname,
+        path: pathname,
         headers: req.headers,
         rawBody,
         ip: req.socket.remoteAddress || "local",
@@ -104,18 +123,30 @@ export function startLocalServer({ host = HOST, port = PORT } = {}) {
       res.end("not found");
     }
   });
-  return new Promise((resolve) => {
-    server.listen(port, host, () => resolve(server));
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, () => resolve());
   });
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  startLocalServer().then(() => {
+  if (process.env.SILENT !== "1") {
+    const address = server.address();
     console.log(JSON.stringify({
       svc: "assessmentReportDev",
       status: "listening",
+      host,
+      port: address && address.port,
       collection,
+      store: store.driver,
+      deployed,
       feishu: process.env.FEISHU_INDEX_MODE || "off",
+      indexFallback: Boolean(store.indexFallback),
     }));
+  }
+  return server;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  startLocalServer().catch((error) => {
+    console.error(error && error.message ? error.message : error);
+    process.exit(1);
   });
 }

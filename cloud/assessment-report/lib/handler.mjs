@@ -282,7 +282,7 @@ export function createHandler(options) {
         collection: store.collection,
         feishu: feishu.mode,
         store: store.driver,
-        deployed: false,
+        deployed: options.deployed === true,
       }, { origin });
       log({ status: 200, ms: Date.now() - started });
       return withCors(response, origin, allowedOrigins);

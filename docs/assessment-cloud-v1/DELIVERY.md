@@ -1,6 +1,6 @@
 # 职业六芒星云端存档 V1.0 第一期交付
 
-状态：代码和本地合成测试已完成。没有合并 `main`，没有创建飞书表，没有部署云函数，没有写入生产 CloudBase 集合。
+状态：隔离函数的 CloudBase 文档库驱动已接上，本地测试通过。没有合并 `main`，没有创建飞书表，没有在本环境执行 `tcb deploy`，没有写入 CloudBase。飞书写入保持 `off`。
 
 ## 1. 已完成功能
 
@@ -32,7 +32,7 @@
 | `star/js/cloud-payload.js` | 把当前六芒星收成协议对象 |
 | `js/cloud-kit.js`、`js/cloud-client.mjs` | 同意、队列、提交、复制、撤销 |
 | `js/report-render.js`、`js/report-page.js`、`r/index.html` | 独立阅读页 |
-| `cloud/assessment-report/` | 隔离 HTTP 服务。默认内存库，飞书默认关闭 |
+| `cloud/assessment-report/` | 隔离 HTTP 服务。本地默认内存库；`ASSESSMENT_STORE_DRIVER=cloudbase` 时写文档库。飞书默认关闭 |
 | `tools/asva-import-preview.html` | 本地导入原型，不进首页 |
 | `docs/assessment-cloud-v1/` | 本说明和协议 schema |
 
@@ -58,15 +58,72 @@
 
 `payload` 至少包含：`reportId`、`assessmentId`、`assessmentVersion`、`nickname`、`completedAt`、`result`、`dimensions`、`interpretation`、`recommendations`、`reportContent`、`source`、`schemaVersion`。同意在 `extensionData.consent`，分享状态在 `extensionData.share.status`。
 
-### 阻断：这轮没有连接 CloudBase
+`createCloudBaseStore` 只在同时满足下面两项时连接文档库：
 
-2026-10-19 只读探测了已有 HTTP 路径：
+- `ASSESSMENT_STORE_DRIVER=cloudbase`
+- `ASSESSMENT_CLOUDBASE_WRITE_CONFIRM=dev-isolated`
 
-- `GET /asva-api/api/health` 返回 200。这是 ASVA 生产服务，发布号 R045。本轮没有调用它的写接口。
-- `GET /assessmentReportDev` 与 `/mindtest-report` 返回 `INVALID_PATH`，说明这两个函数名还没有部署。
-- 本环境没有 CloudBase 登录态，不能列出文档库里已经存在的集合，也不能安全地新建集合。
+集合名仍走 `assertDevCollection`，只能是 `assessment_reports_dev` 或以它为前缀。云函数里用 `@cloudbase/node-sdk` 的当前环境身份，不读密钥，也不把密钥放进前端或 Git。本地 `node cloud/assessment-report/local-server.mjs` 默认仍是内存库。
 
-因此 CloudBase 驱动直接拒绝连接，本地测试使用内存库，集合名仍固定为 `assessment_reports_dev`。确认集合清单并明确授权之后，才能部署 `assessmentReportDev`。部署时最小实例应为 0，避免在个人版上再挂一个常驻服务。
+部署入口 `index.mjs` 另外要求 `ASSESSMENT_DEPLOY_CONFIRM=dev-isolated`。确认部署之后如果驱动不是 `cloudbase`，进程退出，避免冷启动退回内存。`FEISHU_INDEX_MODE=live` 同样拒绝启动。
+
+健康检查返回真实 `store`（`memory` 或 `cloudbase`）。`deployed` 只在部署确认开关为 `dev-isolated` 时为 true。
+
+文档 `_id` 使用 `reportId`。启动时尝试创建集合，并尝试两个唯一索引：`reportId`、`sourceSubmissionId`。SDK 没有 `createIndex` 或创建失败时，函数仍启动，并在日志里标 `indexFallback: true`。这时要在控制台手工建这两个唯一索引。
+
+### 部署前要先开通文档型数据库
+
+2026-10-20 用 manager-node 查了环境 `root-journey-prod-d4d7pzd0a8f805`：
+
+- `EnvInfo.Databases` 为 null / []
+- `checkCollectionExists` 返回「当前环境未开通文档型数据库」
+- `DescribeDbDistribution` 有时返回「The Env Is Initializing, Please Try It Later」
+- 个人版 `baas_personal` 套餐明细里已经包含文档库，`CollectionLimits=100`。不是缺套餐，不需要升级，也不需要购买资源包
+
+文档型数据库未开通或仍在初始化时，创建集合会失败，函数会退出，不会改用内存库。Mac 上先在控制台确认文档型数据库已开通，再创建集合 `assessment_reports_dev`，然后部署。操作步骤、环境变量和 curl 写在 `cloud/assessment-report/DEPLOY.md`。
+
+2026-10-19 的只读探测仍然有效：`GET /asva-api/api/health` 是生产服务，本轮没有调用它的写接口，也没有改这个函数。`assessmentReportDev` 当时还未部署。
+
+### 部署环境变量
+
+| 变量 | 值 |
+|---|---|
+| `ASSESSMENT_COLLECTION` | `assessment_reports_dev` |
+| `ASSESSMENT_STORE_DRIVER` | `cloudbase` |
+| `ASSESSMENT_CLOUDBASE_WRITE_CONFIRM` | `dev-isolated` |
+| `ASSESSMENT_DEPLOY_CONFIRM` | `dev-isolated` |
+| `FEISHU_INDEX_MODE` | `off` |
+| `PUBLIC_REPORT_BASE` | `https://xiangshu3721.github.io/mindtest-web/r/` |
+
+函数名 `assessmentReportDev`，内存 256 MB，超时 60 秒，最小实例 0，HTTP 路径 `/assessmentReportDev`。同一份非密钥配置在 `cloud/assessment-report/cloudbaserc.json`。
+
+公开地址：
+
+```text
+https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessmentReportDev
+```
+
+建议命令（在 Mac 上执行，先 `npm install`）：
+
+```bash
+git fetch origin cursor/star-cloud-archive-v1-46b1
+git checkout cursor/star-cloud-archive-v1-46b1
+cd cloud/assessment-report
+npm install
+tcb login
+tcb fn deploy assessmentReportDev --httpFn --path /assessmentReportDev --dir . \
+  --runtime Nodejs20.19 --timeout 60 --memory 256 --install-dependency false
+```
+
+### 合成 curl
+
+`GET /assessmentReportDev/health` 应返回 `store: "cloudbase"`、`deployed: true`、`feishu: "off"`、`collection: "assessment_reports_dev"`。
+
+然后对 `/assessmentReportDev/v1/results`、`/v1/results/read`、`/v1/results/revoke` 做一轮合成数据（提交、同一份再提交、另一份正文撞同一提交号得到 409、读取、撤销、再读得到 410 且正文没有词）。完整命令和生成合成 JSON 的脚本在 `cloud/assessment-report/DEPLOY.md`。
+
+跨请求持久化：留下一份未撤销的报告，在控制台看到对应文档后，等实例缩到 0 或重新部署，再读同一 `reportId`。仍返回 200 和同一组词，才说明数据在文档库里。内存库在新进程上这次读取会是 404。
+
+`js/assessment-cloud-config.mjs` 的 `endpoint` 保持为空，curl 通过之前不要写上函数地址。
 
 ## 4. 飞书「ASVA 测评记录」字段（待建表，本轮未创建）
 
@@ -134,7 +191,7 @@ node cloud/assessment-report/local-server.mjs
 http://127.0.0.1:4173/r/#rpt_<id>.<secret>
 ```
 
-线上页面将来是 `https://xiangshu3721.github.io/mindtest-web/r/#rpt_<id>.<secret>`。`js/assessment-cloud-config.mjs` 里的 `endpoint` 现在是空的。Pages 上打开链接会显示「报告服务还没有接到这个页面」，直到隔离函数部署并把地址写进这个配置。微信分享标题使用页面里写死的「ASVA 测评报告」。
+线上页面将来是 `https://xiangshu3721.github.io/mindtest-web/r/#rpt_<id>.<secret>`。`js/assessment-cloud-config.mjs` 里的 `endpoint` 现在仍是空的。Pages 上打开链接会显示「报告服务还没有接到这个页面」，直到 Mac 上的 curl 闭环通过，再把函数地址写进这个配置。微信分享标题使用页面里写死的「ASVA 测评报告」。
 
 ## 6. ASVA 导入现状
 
@@ -166,15 +223,15 @@ https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.c
 npm test
 ```
 
-覆盖：ECR、SCL-90、PDQ-4 原有计分测试；六芒星协议不含分数；未同意不提交；同一提交号幂等与冲突；换词序产生新报告且旧链接不变；错误秘密与不存在都是 404；撤销后 410 且正文没有词；飞书默认关闭；mock 镜像失败、重试、同一报告 ID 不新增行；撤销不改变归档状态；多次失败后标记失败但报告仍可读取；live 未确认时不调用 writer；管理员缺密钥为 404；归档必须手填客户 ID，重复归档不新增，不按昵称合并；超限 429、过大 413、错误来源 403；其他测评页面没有引用云端块。
+覆盖：ECR、SCL-90、PDQ-4 原有计分测试；六芒星协议不含分数；未同意不提交；同一提交号幂等与冲突；换词序产生新报告且旧链接不变；错误秘密与不存在都是 404；撤销后 410 且正文没有词；飞书默认关闭；mock 镜像失败、重试、同一报告 ID 不新增行；撤销不改变归档状态；多次失败后标记失败但报告仍可读取；live 未确认时不调用 writer；管理员缺密钥为 404；归档必须手填客户 ID，重复归档不新增，不按昵称合并；超限 429、过大 413、错误来源 403；其他测评页面没有引用云端块。CloudBase 驱动用 mock 客户端覆盖插入幂等、唯一键冲突、更新，以及文档库未开通或初始化中时拒绝启动。没有云函数身份时不会去连真实环境。部署入口在确认开关打开后拒绝内存库和飞书 live。词表快照与 `star/js/data.js` 一致。
 
 浏览器里用合成的六芒星结果走通了：不勾选不请求、断网后再试仍是同一份、H5 读到同一组词、撤销后只剩失效页。ECR 页面没有这块同意。
 
 遗留，本轮不做：
 
 - 真微信里打开和转发
-- 真飞书建表与写入
-- 生产 CloudBase 集合与函数部署
+- 真飞书建表与写入。飞书保持 off
+- Mac 上开通文档型数据库、创建集合 `assessment_reports_dev`、执行 `tcb fn deploy`、用 curl 做真实闭环。本环境没有代替执行
 - 生产 ASVA 工作台改动
 - 其他 12 个测评接入
 

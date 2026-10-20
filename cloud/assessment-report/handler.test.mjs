@@ -4,11 +4,12 @@ import test from "node:test";
 import { WORDS } from "../../star/js/data.js";
 import { buildStarResult } from "../../star/js/cloud-payload.js";
 import { createHandler } from "./lib/handler.mjs";
-import { createMemoryStore } from "./lib/store.mjs";
+import { createCloudBaseStore, createMemoryStore } from "./lib/store.mjs";
 import { createFeishuIndex, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
 import { assertDevCollection, randomSecret } from "./lib/ids.mjs";
-import { createCloudBaseStore } from "./lib/store.mjs";
 import { buildImportDraft } from "./lib/import-draft.mjs";
+import { deployBlockReason } from "./index.mjs";
+import { startLocalServer } from "./local-server.mjs";
 
 function ids() {
   return {
@@ -61,7 +62,9 @@ async function post(handler, path, body, extra = {}) {
 
 test("词表只有一份，服务端再导出的就是六芒星页面上的 31 个词", async () => {
   const serverWords = (await import("./words.mjs")).WORDS;
+  const bundledWords = (await import("./vendor/star-data.js")).WORDS;
   assert.deepEqual(serverWords, WORDS);
+  assert.deepEqual(bundledWords, WORDS);
   assert.equal(WORDS.length, 31);
 });
 
@@ -318,13 +321,300 @@ test("拒绝分数、其他测评、手机号字段、过大正文、错误来�
   assert.equal(store.size(), 0);
 });
 
-test("隔离集合以外直接拒绝，CloudBase 驱动本轮不连接", async () => {
-  assert.throws(() => assertDevCollection("assessment_reports"));
-  await assert.rejects(() => createCloudBaseStore({ ASSESSMENT_STORE_DRIVER: "cloudbase" }));
-  await assert.rejects(() => createCloudBaseStore({
+function confirmedEnv(extra = {}) {
+  return {
+    ASSESSMENT_COLLECTION: "assessment_reports_dev",
     ASSESSMENT_STORE_DRIVER: "cloudbase",
     ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
-  }));
+    ...extra,
+  };
+}
+
+function mockDatabase() {
+  const docs = new Map();
+  const created = [];
+  const indexes = [];
+  const collection = {
+    async add(doc) {
+      const duplicate = docs.has(doc._id) || [...docs.values()].some((item) => (
+        item.reportId === doc.reportId || item.sourceSubmissionId === doc.sourceSubmissionId
+      ));
+      if (duplicate) {
+        const error = new Error("E11000 duplicate key error");
+        error.code = "E11000";
+        throw error;
+      }
+      docs.set(doc._id, { ...doc });
+      return { id: doc._id };
+    },
+    doc(id) {
+      return {
+        async get() {
+          const doc = docs.get(id);
+          return { data: doc ? [doc] : [] };
+        },
+        async update(patch) {
+          const doc = docs.get(id);
+          if (!doc) throw new Error("document does not exist");
+          Object.assign(doc, patch);
+          return { updated: 1 };
+        },
+      };
+    },
+    where(query) {
+      const matched = [...docs.values()].filter((doc) => (
+        Object.entries(query).every(([key, value]) => doc[key] === value)
+      ));
+      return {
+        limit(size) {
+          return { async get() { return { data: matched.slice(0, size) }; } };
+        },
+      };
+    },
+    skip(offset) {
+      const rows = [...docs.values()];
+      return {
+        limit(size) {
+          return { async get() { return { data: rows.slice(offset, offset + size) }; } };
+        },
+      };
+    },
+    async createIndex(spec) {
+      indexes.push(spec);
+    },
+  };
+  return {
+    indexes,
+    created,
+    async createCollection(name) {
+      created.push(name);
+    },
+    collection() {
+      return collection;
+    },
+  };
+}
+
+function sampleDoc() {
+  return {
+    reportId: "rpt_abcdefghijklmnopqrst",
+    sourceSubmissionId: "sub_abcdefghij",
+    bodyHash: "a",
+    byteSize: 12,
+    linkSecretHash: "b",
+    ownerSecretHash: "c",
+    shareStatus: "active",
+    revokedAt: null,
+    archiveStatus: "未归档",
+    customerId: "",
+    feishuSync: "待重试",
+    feishuAttempts: 0,
+    indexStatus: "待重试",
+    createdAt: "2026-10-20T00:00:00.000Z",
+    payload: { nickname: "小林", reportId: "rpt_abcdefghijklmnopqrst" },
+    collection: "assessment_reports_dev",
+  };
+}
+
+test("隔离集合以外直接拒绝，未确认或没有云身份时不连接", async () => {
+  assert.throws(() => assertDevCollection("assessment_reports"));
+  const source = await readFile(new URL("./lib/store.mjs", import.meta.url), "utf8");
+  assert.equal(source.includes("本轮不打包"), false);
+  await assert.rejects(() => createCloudBaseStore({ ASSESSMENT_STORE_DRIVER: "cloudbase" }), /未确认隔离写入/);
+  await assert.rejects(() => createCloudBaseStore(confirmedEnv()), (error) => {
+    assert.equal(String(error.message).includes("不打包"), false);
+    assert.match(error.message, /没有云函数身份/);
+    return true;
+  });
+  await assert.rejects(() => createCloudBaseStore(confirmedEnv({
+    ASSESSMENT_COLLECTION: "assessment_reports",
+  })), /拒绝写入非隔离集合/);
+  await assert.rejects(() => createCloudBaseStore(confirmedEnv({
+    TCB_ENV: "other-env",
+    TENCENTCLOUD_RUNENV: "SCF",
+  })), /非授权环境/);
+});
+
+test("CloudBase mock 客户端：插入幂等、更新，以及文档库未开通时拒绝启动", async () => {
+  const db = mockDatabase();
+  const store = await createCloudBaseStore(confirmedEnv(), db);
+  assert.equal(store.driver, "cloudbase");
+  assert.equal(store.collection, "assessment_reports_dev");
+  assert.deepEqual(db.created, ["assessment_reports_dev"]);
+  assert.deepEqual(store.indexes, ["reportId_1", "sourceSubmissionId_1"]);
+  assert.equal(store.indexFallback, false);
+
+  const doc = sampleDoc();
+  await store.insert(doc);
+  await assert.rejects(() => store.insert({ ...doc }), (error) => {
+    assert.equal(error.code, "duplicate");
+    return true;
+  });
+  await assert.rejects(() => store.insert({
+    ...doc,
+    reportId: "rpt_zzzzzzzzzzzzzzzz",
+  }), (error) => {
+    assert.equal(error.code, "duplicate");
+    return true;
+  });
+
+  const updated = await store.update(doc.reportId, {
+    shareStatus: "revoked",
+    revokedAt: "2026-10-20T01:00:00.000Z",
+    feishuSync: "off",
+    indexStatus: "off",
+  });
+  assert.equal(updated.shareStatus, "revoked");
+  assert.equal(updated.feishuSync, "off");
+  assert.equal(updated.payload.nickname, "小林");
+  const byId = await store.getByReportId(doc.reportId);
+  const bySubmission = await store.getBySubmission(doc.sourceSubmissionId);
+  assert.equal(byId.shareStatus, "revoked");
+  assert.equal(byId.revokedAt, "2026-10-20T01:00:00.000Z");
+  assert.equal(bySubmission.feishuSync, "off");
+  assert.equal(byId._id, undefined);
+  assert.equal(byId._openid, undefined);
+  assert.equal((await store.all()).length, 1);
+  assert.equal(await store.update("rpt_missingmissingmiss", { shareStatus: "revoked" }), null);
+
+  const raced = {
+    async createCollection() {},
+    collection() {
+      return {
+        async add() {
+          const error = new Error("E11000 duplicate key");
+          error.code = "E11000";
+          throw error;
+        },
+        doc() {
+          return { async get() { return { data: [] }; } };
+        },
+        where() {
+          return { limit() { return { async get() { return { data: [] }; } }; } };
+        },
+        async createIndex() {},
+      };
+    },
+  };
+  const raceStore = await createCloudBaseStore(confirmedEnv(), raced);
+  await assert.rejects(() => raceStore.insert(sampleDoc()), (error) => {
+    assert.equal(error.code, "duplicate");
+    return true;
+  });
+
+  const noIndex = {
+    async createCollection() {},
+    collection() {
+      return {};
+    },
+  };
+  const fallback = await createCloudBaseStore(confirmedEnv(), noIndex);
+  assert.equal(fallback.indexFallback, true);
+  assert.deepEqual(fallback.indexes, []);
+
+  const existing = mockDatabase();
+  existing.createCollection = async () => {
+    throw new Error("collection already exists");
+  };
+  const again = await createCloudBaseStore(confirmedEnv(), existing);
+  assert.equal(again.driver, "cloudbase");
+
+  await assert.rejects(() => createCloudBaseStore(confirmedEnv(), {
+    async createCollection() {
+      throw new Error("当前环境未开通文档型数据库");
+    },
+    collection() {
+      return {};
+    },
+  }), /文档型数据库未开通/);
+  await assert.rejects(() => createCloudBaseStore(confirmedEnv(), {
+    async createCollection() {
+      throw new Error("The Env Is Initializing, Please Try It Later");
+    },
+    collection() {
+      return {};
+    },
+  }), /还在初始化/);
+});
+
+test("部署入口在确认开关打开时才允许监听，且拒绝内存库和飞书 live", () => {
+  assert.equal(deployBlockReason({ ASSESSMENT_DEPLOY_CONFIRM: "" }), "hold");
+  assert.equal(deployBlockReason({
+    ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
+    ASSESSMENT_STORE_DRIVER: "memory",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+  }), "memory");
+  assert.equal(deployBlockReason({
+    ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
+    ASSESSMENT_STORE_DRIVER: "cloudbase",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+    FEISHU_INDEX_MODE: "live",
+  }), "feishu-live");
+  assert.equal(deployBlockReason({
+    ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
+    ASSESSMENT_STORE_DRIVER: "cloudbase",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+    FEISHU_INDEX_MODE: "off",
+  }), "");
+});
+
+test("健康检查返回真实驱动；部署确认打开时 deployed 为 true", async () => {
+  const off = createHandler({
+    store: createMemoryStore("assessment_reports_dev"),
+    feishu: createFeishuIndex({ FEISHU_INDEX_MODE: "off" }),
+    silent: true,
+  });
+  const hidden = await off.handle({ method: "GET", path: "/health", headers: {} });
+  assert.equal(hidden.body.store, "memory");
+  assert.equal(hidden.body.deployed, false);
+  assert.equal(hidden.body.feishu, "off");
+
+  const on = createHandler({
+    store: { ...createMemoryStore("assessment_reports_dev"), driver: "cloudbase" },
+    feishu: createFeishuIndex({ FEISHU_INDEX_MODE: "off" }),
+    deployed: true,
+    silent: true,
+  });
+  const shown = await on.handle({ method: "GET", path: "/assessmentReportDev/health", headers: {} });
+  assert.equal(shown.body.store, "cloudbase");
+  assert.equal(shown.body.deployed, true);
+  assert.equal(shown.body.service, "assessmentReportDev");
+});
+
+test("本地 HTTP 默认内存库，函数前缀下的健康检查同样可读", async () => {
+  const previous = {
+    driver: process.env.ASSESSMENT_STORE_DRIVER,
+    confirm: process.env.ASSESSMENT_DEPLOY_CONFIRM,
+    feishu: process.env.FEISHU_INDEX_MODE,
+    silent: process.env.SILENT,
+  };
+  process.env.ASSESSMENT_STORE_DRIVER = "memory";
+  delete process.env.ASSESSMENT_DEPLOY_CONFIRM;
+  process.env.FEISHU_INDEX_MODE = "off";
+  process.env.SILENT = "1";
+  const server = await startLocalServer({ host: "127.0.0.1", port: 0 });
+  try {
+    const port = server.address().port;
+    const body = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
+    assert.equal(body.store, "memory");
+    assert.equal(body.deployed, false);
+    assert.equal(body.feishu, "off");
+    assert.equal(body.collection, "assessment_reports_dev");
+    const prefixed = await (await fetch(`http://127.0.0.1:${port}/assessmentReportDev/health`)).json();
+    assert.equal(prefixed.store, "memory");
+    assert.equal(prefixed.ok, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    for (const [key, value] of Object.entries({
+      ASSESSMENT_STORE_DRIVER: previous.driver,
+      ASSESSMENT_DEPLOY_CONFIRM: previous.confirm,
+      FEISHU_INDEX_MODE: previous.feishu,
+      SILENT: previous.silent,
+    })) {
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
 
 test("其他测评页面没有接上云端块", async () => {
