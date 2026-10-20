@@ -5,7 +5,7 @@
 环境：`root-journey-prod-d4d7pzd0a8f805`（个人版 `baas_personal`）。
 
 函数名：`assessmentReportDev`  
-HTTP 路径：`/assessmentReportDev`  
+HTTP 路径：`/assessment-report-dev`  
 运行时：Nodejs20.19  
 内存：256 MB  
 超时：60 秒  
@@ -14,7 +14,7 @@ HTTP 路径：`/assessmentReportDev`
 公开基址：
 
 ```text
-https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessmentReportDev
+https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessment-report-dev
 ```
 
 这个环境的侧栏是 SQL 数据库（PostgreSQL）。隔离数据是表 `assessment_reports_dev`。云函数用 `@cloudbase/node-sdk` 的 `rdb()` 访问，不使用 SecretId / SecretKey。下面的开关不是密钥。不要把 `ASVA_REPORT_IMPORT_KEY`、飞书应用密钥、`CLOUDBASE_APIKEY`、数据库连接串写进 Git。
@@ -79,7 +79,7 @@ git checkout cursor/star-cloud-archive-v1-46b1
 cd cloud/assessment-report
 npm install
 tcb login
-tcb fn deploy assessmentReportDev --httpFn --path /assessmentReportDev --dir . \
+tcb fn deploy assessmentReportDev --httpFn --path /assessment-report-dev --dir . \
   --runtime Nodejs20.19 --timeout 60 --memory 256 --install-dependency false
 ```
 
@@ -92,11 +92,11 @@ tcb fn deploy assessmentReportDev --httpFn --path /assessmentReportDev --dir . \
 先看健康检查。`store` 必须是 `postgres`，`deployed` 为 true，`feishu` 为 `off`，`collection` 为 `assessment_reports_dev`。
 
 ```bash
-BASE=https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessmentReportDev
+BASE=https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessment-report-dev
 curl -sS "$BASE/health"
 ```
 
-网关会去掉函数路径前缀，函数内部看到的是 `/health` 和 `/v1/results`。公开地址仍带 `/assessmentReportDev`。
+网关会去掉函数路径前缀，函数内部看到的是 `/health` 和 `/v1/results`。公开地址仍带 `/assessment-report-dev`。
 
 在仓库根目录生成两份合成提交（昵称「小林」，不含真实客户数据）：
 
@@ -137,7 +137,7 @@ EOF
 提交、重复提交、冲突、读取、撤销：
 
 ```bash
-BASE=https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessmentReportDev
+BASE=https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessment-report-dev
 META=$(cat /tmp/star-a.json.meta)
 RID=$(node -e 'console.log(JSON.parse(process.argv[1]).reportId)' "$META")
 SECRET=$(node -e 'console.log(JSON.parse(process.argv[1]).linkSecret)' "$META")
@@ -205,4 +205,4 @@ B 这份不要撤销。健康检查里的 `store` 已是 `postgres` 之后：
 
 冷启动之后仍返回 200 和同一组词，说明行在 PostgreSQL 里。若当时误用内存库，新进程上这次读取会是 404。
 
-前端 `js/assessment-cloud-config.mjs` 的 `endpoint` 仍保持空。curl 通过之前不要把函数地址写进页面。通过之后再把 endpoint 设为上面的 `BASE`（不要加末尾斜杠）。
+前端 `js/assessment-cloud-config.mjs` 的 `endpoint` 已写成上面的 `BASE`，没有末尾斜杠。`reportPageBase` 是 `https://xiangshu3721.github.io/mindtest-web/r/`。

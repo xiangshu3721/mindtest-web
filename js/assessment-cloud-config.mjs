@@ -1,5 +1,5 @@
-/** 公开配置。密钥不要写在这里。endpoint 为空时，只在本机自动连本地隔离服务。 */
+/** 公开配置。密钥不要写在这里。 */
 export const ASSESSMENT_CLOUD_CONFIG = {
-  endpoint: "",
-  reportPageBase: "",
+  endpoint: "https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessment-report-dev",
+  reportPageBase: "https://xiangshu3721.github.io/mindtest-web/r/",
 };

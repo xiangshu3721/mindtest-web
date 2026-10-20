@@ -97,12 +97,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS assessment_reports_dev_source_submission_id_ui
 | `FEISHU_INDEX_MODE` | `off` |
 | `PUBLIC_REPORT_BASE` | `https://xiangshu3721.github.io/mindtest-web/r/` |
 
-函数名 `assessmentReportDev`，内存 256 MB，超时 60 秒，最小实例 0，HTTP 路径 `/assessmentReportDev`。同一份非密钥配置在 `cloud/assessment-report/cloudbaserc.json`。
+函数名 `assessmentReportDev`，内存 256 MB，超时 60 秒，最小实例 0，HTTP 路径 `/assessment-report-dev`。同一份非密钥配置在 `cloud/assessment-report/cloudbaserc.json`。
 
 公开地址：
 
 ```text
-https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessmentReportDev
+https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessment-report-dev
 ```
 
 建议命令（在 Mac 上执行，先 `npm install`）：
@@ -113,19 +113,19 @@ git checkout cursor/star-cloud-archive-v1-46b1
 cd cloud/assessment-report
 npm install
 tcb login
-tcb fn deploy assessmentReportDev --httpFn --path /assessmentReportDev --dir . \
+tcb fn deploy assessmentReportDev --httpFn --path /assessment-report-dev --dir . \
   --runtime Nodejs20.19 --timeout 60 --memory 256 --install-dependency false
 ```
 
 ### 合成 curl
 
-`GET /assessmentReportDev/health` 应返回 `store: "postgres"`、`deployed: true`、`feishu: "off"`、`collection: "assessment_reports_dev"`。
+`GET /assessment-report-dev/health` 应返回 `store: "postgres"`、`deployed: true`、`feishu: "off"`、`collection: "assessment_reports_dev"`。
 
-然后对 `/assessmentReportDev/v1/results`、`/v1/results/read`、`/v1/results/revoke` 做一轮合成数据（提交、同一份再提交、另一份正文撞同一提交号得到 409、读取、撤销、再读得到 410 且正文没有词）。完整命令和生成合成 JSON 的脚本在 `cloud/assessment-report/DEPLOY.md`。
+然后对 `/assessment-report-dev/v1/results`、`/v1/results/read`、`/v1/results/revoke` 做一轮合成数据（提交、同一份再提交、另一份正文撞同一提交号得到 409、读取、撤销、再读得到 410 且正文没有词）。完整命令和生成合成 JSON 的脚本在 `cloud/assessment-report/DEPLOY.md`。
 
 跨请求持久化：留下一份未撤销的报告，在 SQL 数据库里能查到它的 `report_id` 之后，等实例缩到 0 或重新部署，再读同一 `reportId`。仍返回 200 和同一组词，才说明行在 PostgreSQL 里。内存库在新进程上这次读取会是 404。
 
-`js/assessment-cloud-config.mjs` 的 `endpoint` 保持为空，curl 通过之前不要写上函数地址。
+`js/assessment-cloud-config.mjs` 的 `endpoint` 已写成上述基址，没有末尾斜杠。`reportPageBase` 是 `https://xiangshu3721.github.io/mindtest-web/r/`。
 
 ## 4. 飞书「ASVA 测评记录」字段（待建表，本轮未创建）
 
@@ -193,7 +193,7 @@ node cloud/assessment-report/local-server.mjs
 http://127.0.0.1:4173/r/#rpt_<id>.<secret>
 ```
 
-线上页面将来是 `https://xiangshu3721.github.io/mindtest-web/r/#rpt_<id>.<secret>`。`js/assessment-cloud-config.mjs` 里的 `endpoint` 现在仍是空的。Pages 上打开链接会显示「报告服务还没有接到这个页面」，直到 Mac 上的 curl 闭环通过，再把函数地址写进这个配置。微信分享标题使用页面里写死的「ASVA 测评报告」。
+线上页面是 `https://xiangshu3721.github.io/mindtest-web/r/#rpt_<id>.<secret>`。`js/assessment-cloud-config.mjs` 的 `endpoint` 已指向隔离函数 `/assessment-report-dev`，`reportPageBase` 指向上面的 `r/`。微信分享标题使用页面里写死的「ASVA 测评报告」。
 
 ## 6. ASVA 导入现状
 
