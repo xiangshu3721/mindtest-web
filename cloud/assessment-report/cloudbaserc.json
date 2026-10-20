@@ -17,7 +17,7 @@
       ],
       "envVariables": {
         "ASSESSMENT_COLLECTION": "assessment_reports_dev",
-        "ASSESSMENT_STORE_DRIVER": "cloudbase",
+        "ASSESSMENT_STORE_DRIVER": "postgres",
         "ASSESSMENT_CLOUDBASE_WRITE_CONFIRM": "dev-isolated",
         "ASSESSMENT_DEPLOY_CONFIRM": "dev-isolated",
         "FEISHU_INDEX_MODE": "off",

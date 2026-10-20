@@ -4,7 +4,7 @@ import test from "node:test";
 import { WORDS } from "../../star/js/data.js";
 import { buildStarResult } from "../../star/js/cloud-payload.js";
 import { createHandler } from "./lib/handler.mjs";
-import { createCloudBaseStore, createMemoryStore } from "./lib/store.mjs";
+import { createCloudBaseStore, createMemoryStore, tableSql } from "./lib/store.mjs";
 import { createFeishuIndex, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
 import { assertDevCollection, randomSecret } from "./lib/ids.mjs";
 import { buildImportDraft } from "./lib/import-draft.mjs";
@@ -324,73 +324,96 @@ test("拒绝分数、其他测评、手机号字段、过大正文、错误来�
 function confirmedEnv(extra = {}) {
   return {
     ASSESSMENT_COLLECTION: "assessment_reports_dev",
-    ASSESSMENT_STORE_DRIVER: "cloudbase",
+    ASSESSMENT_STORE_DRIVER: "postgres",
     ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
     ...extra,
   };
 }
 
-function mockDatabase() {
-  const docs = new Map();
-  const created = [];
-  const indexes = [];
-  const collection = {
-    async add(doc) {
-      const duplicate = docs.has(doc._id) || [...docs.values()].some((item) => (
-        item.reportId === doc.reportId || item.sourceSubmissionId === doc.sourceSubmissionId
-      ));
-      if (duplicate) {
-        const error = new Error("E11000 duplicate key error");
-        error.code = "E11000";
-        throw error;
+function mockSql() {
+  const rows = new Map();
+  const statements = [];
+  return {
+    statements,
+    async query(text, params = []) {
+      statements.push(text);
+      if (text.startsWith("CREATE TABLE") || text.startsWith("CREATE UNIQUE INDEX")) return { rows: [] };
+      if (text.startsWith("INSERT")) {
+        const [reportId, submissionId, raw] = params;
+        if (rows.has(reportId) || [...rows.values()].some((item) => item.source_submission_id === submissionId)) {
+          const error = new Error("duplicate key value violates unique constraint");
+          error.code = "23505";
+          throw error;
+        }
+        rows.set(reportId, { report_id: reportId, source_submission_id: submissionId, doc: JSON.parse(raw) });
+        return { rows: [] };
       }
-      docs.set(doc._id, { ...doc });
-      return { id: doc._id };
-    },
-    doc(id) {
-      return {
-        async get() {
-          const doc = docs.get(id);
-          return { data: doc ? [doc] : [] };
-        },
-        async update(patch) {
-          const doc = docs.get(id);
-          if (!doc) throw new Error("document does not exist");
-          Object.assign(doc, patch);
-          return { updated: 1 };
-        },
-      };
-    },
-    where(query) {
-      const matched = [...docs.values()].filter((doc) => (
-        Object.entries(query).every(([key, value]) => doc[key] === value)
-      ));
-      return {
-        limit(size) {
-          return { async get() { return { data: matched.slice(0, size) }; } };
-        },
-      };
-    },
-    skip(offset) {
-      const rows = [...docs.values()];
-      return {
-        limit(size) {
-          return { async get() { return { data: rows.slice(offset, offset + size) }; } };
-        },
-      };
-    },
-    async createIndex(spec) {
-      indexes.push(spec);
+      if (text.startsWith("UPDATE")) {
+        const [raw, submissionId, reportId] = params;
+        const row = rows.get(reportId);
+        if (!row) return { rows: [] };
+        row.doc = JSON.parse(raw);
+        row.source_submission_id = submissionId;
+        return { rows: [] };
+      }
+      if (text.includes("WHERE report_id")) {
+        const row = rows.get(params[0]);
+        return { rows: row ? [{ doc: row.doc }] : [] };
+      }
+      if (text.includes("WHERE source_submission_id")) {
+        const row = [...rows.values()].find((item) => item.source_submission_id === params[0]);
+        return { rows: row ? [{ doc: row.doc }] : [] };
+      }
+      if (text.includes("ORDER BY report_id")) {
+        const [limit, offset] = params;
+        return { rows: [...rows.values()].slice(offset, offset + limit).map((item) => ({ doc: item.doc })) };
+      }
+      throw new Error(`unexpected sql ${text}`);
     },
   };
+}
+
+function mockRdb(options = {}) {
+  const rows = new Map();
+  function run(state) {
+    if (options.missing && state.action === "select") {
+      return { data: null, error: { code: "PGRST205", message: "Could not find the table 'public.assessment_reports_dev' in the schema cache" } };
+    }
+    if (state.action === "insert") {
+      const payload = state.payload;
+      if (options.alwaysDuplicate || rows.has(payload.report_id) || [...rows.values()].some((item) => item.source_submission_id === payload.source_submission_id)) {
+        return { data: null, error: { code: "23505", message: "duplicate key value violates unique constraint" } };
+      }
+      rows.set(payload.report_id, payload);
+      return { data: [payload], error: null };
+    }
+    if (state.action === "update") {
+      const row = rows.get(state.filters.report_id);
+      if (!row) return { data: [], error: null };
+      const next = { ...row, ...state.payload };
+      rows.set(state.filters.report_id, next);
+      return { data: [next], error: null };
+    }
+    let list = [...rows.values()];
+    for (const [key, value] of Object.entries(state.filters)) list = list.filter((row) => row[key] === value);
+    if (state.range) list = list.slice(state.range[0], state.range[1] + 1);
+    else list = list.slice(0, state.limit);
+    return { data: list, error: null };
+  }
   return {
-    indexes,
-    created,
-    async createCollection(name) {
-      created.push(name);
-    },
-    collection() {
-      return collection;
+    from() {
+      const state = { action: "select", filters: {}, payload: null, limit: 100, range: null };
+      const api = {
+        select() { return api; },
+        insert(row) { state.action = "insert"; state.payload = row; return api; },
+        update(row) { state.action = "update"; state.payload = row; return api; },
+        eq(key, value) { state.filters[key] = value; return api; },
+        order() { return api; },
+        limit(size) { state.limit = size; return api; },
+        range(from, to) { state.range = [from, to]; return api; },
+        then(resolve, reject) { return Promise.resolve(run(state)).then(resolve, reject); },
+      };
+      return api;
     },
   };
 }
@@ -416,33 +439,40 @@ function sampleDoc() {
   };
 }
 
-test("隔离集合以外直接拒绝，未确认或没有云身份时不连接", async () => {
-  assert.throws(() => assertDevCollection("assessment_reports"));
+test("隔离表以外直接拒绝，未确认或没有云身份时不连接", async () => {
+  assert.throws(() => assertDevCollection("assessment_reports"), /拒绝写入非隔离表/);
   const source = await readFile(new URL("./lib/store.mjs", import.meta.url), "utf8");
-  assert.equal(source.includes("本轮不打包"), false);
-  await assert.rejects(() => createCloudBaseStore({ ASSESSMENT_STORE_DRIVER: "cloudbase" }), /未确认隔离写入/);
+  assert.equal(source.includes("database()"), false);
+  assert.equal(source.includes("createCollection"), false);
+  assert.equal(source.includes("文档型"), false);
+  assert.match(source, /app\.rdb\(/);
+  const sql = tableSql("assessment_reports_dev").join("\n");
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS "assessment_reports_dev"/);
+  assert.match(sql, /report_id text PRIMARY KEY/);
+  assert.match(sql, /doc jsonb NOT NULL/);
+  assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS "assessment_reports_dev_source_submission_id_uidx"/);
+  await assert.rejects(() => createCloudBaseStore({ ASSESSMENT_STORE_DRIVER: "postgres" }), /未确认隔离写入/);
   await assert.rejects(() => createCloudBaseStore(confirmedEnv()), (error) => {
-    assert.equal(String(error.message).includes("不打包"), false);
     assert.match(error.message, /没有云函数身份/);
+    assert.equal(error.message.includes("文档型"), false);
     return true;
   });
   await assert.rejects(() => createCloudBaseStore(confirmedEnv({
     ASSESSMENT_COLLECTION: "assessment_reports",
-  })), /拒绝写入非隔离集合/);
+  })), /拒绝写入非隔离表/);
   await assert.rejects(() => createCloudBaseStore(confirmedEnv({
     TCB_ENV: "other-env",
     TENCENTCLOUD_RUNENV: "SCF",
   })), /非授权环境/);
 });
 
-test("CloudBase mock 客户端：插入幂等、更新，以及文档库未开通时拒绝启动", async () => {
-  const db = mockDatabase();
+test("PostgreSQL mock：插入幂等、更新，rdb 缺表时给出建表 SQL", async () => {
+  const db = mockSql();
   const store = await createCloudBaseStore(confirmedEnv(), db);
-  assert.equal(store.driver, "cloudbase");
+  assert.equal(store.driver, "postgres");
   assert.equal(store.collection, "assessment_reports_dev");
-  assert.deepEqual(db.created, ["assessment_reports_dev"]);
-  assert.deepEqual(store.indexes, ["reportId_1", "sourceSubmissionId_1"]);
-  assert.equal(store.indexFallback, false);
+  assert.equal(db.statements.some((statement) => statement.startsWith("CREATE TABLE")), true);
+  assert.equal(db.statements.some((statement) => statement.startsWith("CREATE UNIQUE INDEX")), true);
 
   const doc = sampleDoc();
   await store.insert(doc);
@@ -472,69 +502,48 @@ test("CloudBase mock 客户端：插入幂等、更新，以及文档库未开�
   assert.equal(byId.shareStatus, "revoked");
   assert.equal(byId.revokedAt, "2026-10-20T01:00:00.000Z");
   assert.equal(bySubmission.feishuSync, "off");
-  assert.equal(byId._id, undefined);
-  assert.equal(byId._openid, undefined);
   assert.equal((await store.all()).length, 1);
   assert.equal(await store.update("rpt_missingmissingmiss", { shareStatus: "revoked" }), null);
 
   const raced = {
-    async createCollection() {},
-    collection() {
-      return {
-        async add() {
-          const error = new Error("E11000 duplicate key");
-          error.code = "E11000";
-          throw error;
-        },
-        doc() {
-          return { async get() { return { data: [] }; } };
-        },
-        where() {
-          return { limit() { return { async get() { return { data: [] }; } }; } };
-        },
-        async createIndex() {},
-      };
+    async query(text, params = []) {
+      if (text.startsWith("CREATE")) return { rows: [] };
+      if (text.startsWith("SELECT")) return { rows: [] };
+      if (text.startsWith("INSERT")) {
+        const error = new Error("duplicate key value violates unique constraint");
+        error.code = "23505";
+        throw error;
+      }
+      throw new Error(`unexpected sql ${text} ${params.length}`);
     },
   };
-  const raceStore = await createCloudBaseStore(confirmedEnv(), raced);
+  const raceStore = await createCloudBaseStore(confirmedEnv({ ASSESSMENT_STORE_DRIVER: "cloudbase" }), raced);
   await assert.rejects(() => raceStore.insert(sampleDoc()), (error) => {
     assert.equal(error.code, "duplicate");
     return true;
   });
 
-  const noIndex = {
-    async createCollection() {},
-    collection() {
-      return {};
-    },
-  };
-  const fallback = await createCloudBaseStore(confirmedEnv(), noIndex);
-  assert.equal(fallback.indexFallback, true);
-  assert.deepEqual(fallback.indexes, []);
+  await assert.rejects(() => createCloudBaseStore(confirmedEnv(), mockRdb({ missing: true })), (error) => {
+    assert.match(error.message, /还没有表 assessment_reports_dev/);
+    assert.match(error.message, /CREATE TABLE IF NOT EXISTS "assessment_reports_dev"/);
+    assert.equal(error.message.includes("文档型"), false);
+    return true;
+  });
 
-  const existing = mockDatabase();
-  existing.createCollection = async () => {
-    throw new Error("collection already exists");
-  };
-  const again = await createCloudBaseStore(confirmedEnv(), existing);
-  assert.equal(again.driver, "cloudbase");
-
-  await assert.rejects(() => createCloudBaseStore(confirmedEnv(), {
-    async createCollection() {
-      throw new Error("当前环境未开通文档型数据库");
-    },
-    collection() {
-      return {};
-    },
-  }), /文档型数据库未开通/);
-  await assert.rejects(() => createCloudBaseStore(confirmedEnv(), {
-    async createCollection() {
-      throw new Error("The Env Is Initializing, Please Try It Later");
-    },
-    collection() {
-      return {};
-    },
-  }), /还在初始化/);
+  const rdb = mockRdb();
+  const viaRdb = await createCloudBaseStore(confirmedEnv(), rdb);
+  const second = sampleDoc();
+  second.reportId = "rpt_rdbrdbrdbrdbrdbrdb";
+  second.sourceSubmissionId = "sub_rdbrdbrdb";
+  await viaRdb.insert(second);
+  await assert.rejects(() => viaRdb.insert({ ...second }), (error) => {
+    assert.equal(error.code, "duplicate");
+    return true;
+  });
+  const changed = await viaRdb.update(second.reportId, { shareStatus: "revoked", feishuSync: "off" });
+  assert.equal(changed.shareStatus, "revoked");
+  assert.equal((await viaRdb.getByReportId(second.reportId)).feishuSync, "off");
+  assert.equal((await viaRdb.getBySubmission(second.sourceSubmissionId)).shareStatus, "revoked");
 });
 
 test("部署入口在确认开关打开时才允许监听，且拒绝内存库和飞书 live", () => {
@@ -546,10 +555,16 @@ test("部署入口在确认开关打开时才允许监听，且拒绝内存库�
   }), "memory");
   assert.equal(deployBlockReason({
     ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
-    ASSESSMENT_STORE_DRIVER: "cloudbase",
+    ASSESSMENT_STORE_DRIVER: "postgres",
     ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
     FEISHU_INDEX_MODE: "live",
   }), "feishu-live");
+  assert.equal(deployBlockReason({
+    ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
+    ASSESSMENT_STORE_DRIVER: "postgres",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+    FEISHU_INDEX_MODE: "off",
+  }), "");
   assert.equal(deployBlockReason({
     ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
     ASSESSMENT_STORE_DRIVER: "cloudbase",
@@ -570,13 +585,13 @@ test("健康检查返回真实驱动；部署确认打开时 deployed 为 true",
   assert.equal(hidden.body.feishu, "off");
 
   const on = createHandler({
-    store: { ...createMemoryStore("assessment_reports_dev"), driver: "cloudbase" },
+    store: { ...createMemoryStore("assessment_reports_dev"), driver: "postgres" },
     feishu: createFeishuIndex({ FEISHU_INDEX_MODE: "off" }),
     deployed: true,
     silent: true,
   });
   const shown = await on.handle({ method: "GET", path: "/assessmentReportDev/health", headers: {} });
-  assert.equal(shown.body.store, "cloudbase");
+  assert.equal(shown.body.store, "postgres");
   assert.equal(shown.body.deployed, true);
   assert.equal(shown.body.service, "assessmentReportDev");
 });

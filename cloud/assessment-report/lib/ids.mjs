@@ -8,7 +8,7 @@ export const SUBMISSION_RE = /^sub_[A-Za-z0-9_-]{8,64}$/;
 export function assertDevCollection(name) {
   const value = String(name || "");
   if (value !== DEV_COLLECTION && !value.startsWith(`${DEV_COLLECTION}_`)) {
-    throw new Error(`拒绝写入非隔离集合：${value || "(empty)"}`);
+    throw new Error(`拒绝写入非隔离表：${value || "(empty)"}`);
   }
   return value;
 }

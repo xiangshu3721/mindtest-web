@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHandler } from "./lib/handler.mjs";
-import { createCloudBaseStore, createMemoryStore } from "./lib/store.mjs";
+import { createCloudBaseStore, createMemoryStore, isCloudStoreDriver } from "./lib/store.mjs";
 import { createFeishuIndex } from "./lib/feishu.mjs";
 import { assertDevCollection } from "./lib/ids.mjs";
 
@@ -22,7 +22,7 @@ export function normalizeRequestPath(pathname) {
 }
 
 async function openStore() {
-  if (process.env.ASSESSMENT_STORE_DRIVER === "cloudbase") {
+  if (isCloudStoreDriver(process.env.ASSESSMENT_STORE_DRIVER)) {
     return createCloudBaseStore(process.env);
   }
   return createMemoryStore(collection);

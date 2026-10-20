@@ -17,27 +17,33 @@ HTTP 路径：`/assessmentReportDev`
 https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessmentReportDev
 ```
 
-云函数内用 `@cloudbase/node-sdk` 的当前环境身份访问文档库，不使用 SecretId / SecretKey。下面的开关不是密钥，可以放在函数环境变量里。不要把 `ASVA_REPORT_IMPORT_KEY`、飞书应用密钥写进 Git。
+这个环境的侧栏是 SQL 数据库（PostgreSQL）。隔离数据是表 `assessment_reports_dev`。云函数用 `@cloudbase/node-sdk` 的 `rdb()` 访问，不使用 SecretId / SecretKey。下面的开关不是密钥。不要把 `ASVA_REPORT_IMPORT_KEY`、飞书应用密钥、`CLOUDBASE_APIKEY`、数据库连接串写进 Git。
 
-## 部署前：文档型数据库必须已开通
+## 先在 SQL 数据库建表
 
-2026-10-20 在 Mac 上用 manager-node 查过这个环境：
+控制台：环境 `root-journey-prod-d4d7pzd0a8f805` → SQL 数据库 → 执行下面的 SQL。不要建 `assessment_reports`。
 
-- `EnvInfo.Databases` 为 null / []
-- `checkCollectionExists` 返回「当前环境未开通文档型数据库」
-- `DescribeDbDistribution` 有时返回「The Env Is Initializing, Please Try It Later」
-- 个人版套餐明细里已经包含文档库，`CollectionLimits=100`。这不是缺套餐。
+```sql
+CREATE TABLE IF NOT EXISTS assessment_reports_dev (
+  report_id text PRIMARY KEY,
+  source_submission_id text NOT NULL,
+  doc jsonb NOT NULL
+);
 
-若控制台里文档型数据库仍是未开通或初始化中，创建集合 `assessment_reports_dev` 会失败。函数发现这个错误会退出，不会退回内存库。先开通文档型数据库，等状态变为可用，再继续。不要为此升级套餐或购买资源包。
+CREATE UNIQUE INDEX IF NOT EXISTS assessment_reports_dev_source_submission_id_uidx
+  ON assessment_reports_dev (source_submission_id);
+```
 
-控制台路径：环境 `root-journey-prod-d4d7pzd0a8f805` → 数据库 → 文档型。开通完成后再建集合。
+`report_id` 对应 `reportId`。`source_submission_id` 对应 `clientSubmissionId`，唯一。`doc` 是整份服务端文档（jsonb），字段与内存文档一致：`reportId`、`sourceSubmissionId`、`bodyHash`、`byteSize`、`linkSecretHash`、`ownerSecretHash`、`shareStatus`、`revokedAt`、`archiveStatus`、`customerId`、`feishuSync`、`feishuAttempts`、`indexStatus`、`createdAt`、`payload`、`collection`。
+
+`rdb()` 不能执行建表。表还不存在时，函数启动失败，日志里会带上同一段 SQL。设了 `ASSESSMENT_PG_URL` 时，函数会自己执行这两句。
 
 ## 环境变量
 
 | 变量 | 值 |
 |---|---|
 | `ASSESSMENT_COLLECTION` | `assessment_reports_dev` |
-| `ASSESSMENT_STORE_DRIVER` | `cloudbase` |
+| `ASSESSMENT_STORE_DRIVER` | `postgres` |
 | `ASSESSMENT_CLOUDBASE_WRITE_CONFIRM` | `dev-isolated` |
 | `ASSESSMENT_DEPLOY_CONFIRM` | `dev-isolated` |
 | `FEISHU_INDEX_MODE` | `off` |
@@ -47,20 +53,21 @@ https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.c
 
 同一份声明在本目录 `cloudbaserc.json` 的 `envVariables`。其中没有密钥。
 
-`FEISHU_INDEX_MODE=live` 时进程直接退出。这一期不要设 `mock` 以外的值；部署就用 `off`。
+`FEISHU_INDEX_MODE=live` 时进程直接退出。部署就用 `off`。
 
-## 集合与索引
+### 鉴权
 
-只创建 `assessment_reports_dev`。不要创建或写入 `assessment_reports`。
+平台给 HTTP 云函数注入了临时身份时，`rdb()` 直接可用，不必再配密钥。
 
-启动时会尝试 `createCollection`，并尝试两个唯一索引：
+若日志是「PostgreSQL 鉴权失败」：
 
-- `reportId_1`：字段 `reportId`，唯一
-- `sourceSubmissionId_1`：字段 `sourceSubmissionId`，唯一
+1. 控制台打开该环境的 API Key，复制值。
+2. 只在函数 `assessmentReportDev` 的环境变量里新增 `CLOUDBASE_APIKEY`。
+3. 不要把这个值写进仓库、`cloudbaserc.json` 或前端。
 
-文档 `_id` 使用 `reportId`。若运行日志里 `indexFallback` 为 true，或控制台看不到这两个索引，就在控制台手工建。索引建不成时函数仍会启动，但并发下的重复插入要靠这两个唯一索引挡住。
+`rdb()` 仍然不可用时，再在函数环境变量设置 `ASSESSMENT_PG_URL`，值为控制台 SQL 数据库给出的连接串。它同样不能进 Git。有这个变量时，启动会尝试幂等建表。
 
-字段与内存文档一致：`reportId`、`sourceSubmissionId`、`bodyHash`、`byteSize`、`linkSecretHash`、`ownerSecretHash`、`shareStatus`、`revokedAt`、`archiveStatus`、`customerId`、`feishuSync`、`feishuAttempts`、`indexStatus`、`createdAt`、`payload`、`collection`。
+健康检查里的 `store` 是 `postgres`。`collection` 是表名 `assessment_reports_dev`。
 
 ## 命令
 
@@ -82,7 +89,7 @@ tcb fn deploy assessmentReportDev --httpFn --path /assessmentReportDev --dir . \
 
 ## 用 curl 做合成闭环
 
-先看健康检查。`store` 必须是 `cloudbase`，`deployed` 为 true，`feishu` 为 `off`，`collection` 为 `assessment_reports_dev`。
+先看健康检查。`store` 必须是 `postgres`，`deployed` 为 true，`feishu` 为 `off`，`collection` 为 `assessment_reports_dev`。
 
 ```bash
 BASE=https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessmentReportDev
@@ -190,12 +197,12 @@ curl -sS -o /tmp/conflict.json -w '%{http_code}\n' -X POST "$BASE/v1/results" \
 
 ## 怎样确认不是内存库
 
-B 这份不要撤销。健康检查里的 `store` 已是 `cloudbase` 之后：
+B 这份不要撤销。健康检查里的 `store` 已是 `postgres` 之后：
 
-1. 在控制台打开集合 `assessment_reports_dev`，能看到 B 的 `reportId`。
+1. 在 SQL 数据库执行 `SELECT report_id, doc->>'shareStatus' FROM assessment_reports_dev;`，能看到 B 的 `report_id`。
 2. 最小实例是 0。等实例缩到 0，或重新部署一次让进程换新。
 3. 再对 B 做一次 `POST /v1/results/read`。
 
-冷启动之后仍返回 200 和同一组词，说明文档在文档库里，不是进程内存。若当时误用内存库，新进程上这次读取会是 404。
+冷启动之后仍返回 200 和同一组词，说明行在 PostgreSQL 里。若当时误用内存库，新进程上这次读取会是 404。
 
 前端 `js/assessment-cloud-config.mjs` 的 `endpoint` 仍保持空。curl 通过之前不要把函数地址写进页面。通过之后再把 endpoint 设为上面的 `BASE`（不要加末尾斜杠）。

@@ -1,6 +1,6 @@
 # 职业六芒星云端存档 V1.0 第一期交付
 
-状态：隔离函数的 CloudBase 文档库驱动已接上，本地测试通过。没有合并 `main`，没有创建飞书表，没有在本环境执行 `tcb deploy`，没有写入 CloudBase。飞书写入保持 `off`。
+状态：隔离存储改为环境里的 PostgreSQL 表 `assessment_reports_dev`。本地测试通过。没有合并 `main`，没有创建飞书表，没有在本环境执行 `tcb deploy`，没有写入数据库。飞书写入保持 `off`。
 
 ## 1. 已完成功能
 
@@ -32,15 +32,15 @@
 | `star/js/cloud-payload.js` | 把当前六芒星收成协议对象 |
 | `js/cloud-kit.js`、`js/cloud-client.mjs` | 同意、队列、提交、复制、撤销 |
 | `js/report-render.js`、`js/report-page.js`、`r/index.html` | 独立阅读页 |
-| `cloud/assessment-report/` | 隔离 HTTP 服务。本地默认内存库；`ASSESSMENT_STORE_DRIVER=cloudbase` 时写文档库。飞书默认关闭 |
+| `cloud/assessment-report/` | 隔离 HTTP 服务。本地默认内存库；云上写入 PostgreSQL 表。飞书默认关闭 |
 | `tools/asva-import-preview.html` | 本地导入原型，不进首页 |
 | `docs/assessment-cloud-v1/` | 本说明和协议 schema |
 
-## 3. CloudBase 数据模型与隔离
+## 3. PostgreSQL 表与隔离
 
-计划中的集合名：`assessment_reports_dev`。代码拒绝 `assessment_reports` 以及其他不以 `assessment_reports_dev` 开头的集合名。
+环境 `root-journey-prod-d4d7pzd0a8f805` 是个人版 PostgreSQL。隔离数据放在 SQL 表 `assessment_reports_dev`。代码拒绝 `assessment_reports` 以及其他不以 `assessment_reports_dev` 开头的表名。
 
-计划中的 HTTP 函数名：`assessmentReportDev`，路径与现有 `/asva-api` 分开。
+HTTP 函数名：`assessmentReportDev`，路径与现有 `/asva-api` 分开。
 
 文档字段（服务端信封，不返回给普通阅读页）：
 
@@ -58,38 +58,40 @@
 
 `payload` 至少包含：`reportId`、`assessmentId`、`assessmentVersion`、`nickname`、`completedAt`、`result`、`dimensions`、`interpretation`、`recommendations`、`reportContent`、`source`、`schemaVersion`。同意在 `extensionData.consent`，分享状态在 `extensionData.share.status`。
 
-`createCloudBaseStore` 只在同时满足下面两项时连接文档库：
+表结构：`report_id` 主键，`source_submission_id` 唯一索引，`doc` 为 jsonb，里面是上面的整份服务端文档。云函数优先用 `@cloudbase/node-sdk` 的 `rdb()` 读写。PostgREST 不能建表，所以部署前要在控制台「SQL 数据库」执行：
 
-- `ASSESSMENT_STORE_DRIVER=cloudbase`
+```sql
+CREATE TABLE IF NOT EXISTS assessment_reports_dev (
+  report_id text PRIMARY KEY,
+  source_submission_id text NOT NULL,
+  doc jsonb NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS assessment_reports_dev_source_submission_id_uidx
+  ON assessment_reports_dev (source_submission_id);
+```
+
+若函数环境变量里有 `ASSESSMENT_PG_URL`，启动时会执行同一段语句。
+
+`createCloudBaseStore` 只在同时满足下面两项时连接：
+
+- `ASSESSMENT_STORE_DRIVER=postgres`（`cloudbase` 仍接受，健康检查里的 `store` 都是 `postgres`）
 - `ASSESSMENT_CLOUDBASE_WRITE_CONFIRM=dev-isolated`
 
-集合名仍走 `assertDevCollection`，只能是 `assessment_reports_dev` 或以它为前缀。云函数里用 `@cloudbase/node-sdk` 的当前环境身份，不读密钥，也不把密钥放进前端或 Git。本地 `node cloud/assessment-report/local-server.mjs` 默认仍是内存库。
+本地 `node cloud/assessment-report/local-server.mjs` 默认仍是内存库。部署入口另外要求 `ASSESSMENT_DEPLOY_CONFIRM=dev-isolated`。确认之后如果不是 PostgreSQL 驱动，进程退出。`FEISHU_INDEX_MODE=live` 同样拒绝启动。
 
-部署入口 `index.mjs` 另外要求 `ASSESSMENT_DEPLOY_CONFIRM=dev-isolated`。确认部署之后如果驱动不是 `cloudbase`，进程退出，避免冷启动退回内存。`FEISHU_INDEX_MODE=live` 同样拒绝启动。
+健康检查返回真实 `store`（`memory` 或 `postgres`）。`deployed` 只在部署确认开关为 `dev-isolated` 时为 true。`collection` 字段是表名。
 
-健康检查返回真实 `store`（`memory` 或 `cloudbase`）。`deployed` 只在部署确认开关为 `dev-isolated` 时为 true。
+云函数在平台注入了临时身份时，`rdb()` 不需要额外密钥。若启动日志是鉴权失败，在函数环境变量设置 `CLOUDBASE_APIKEY`（控制台生成的 API Key）。不要写进 Git，也不要写进 `cloudbaserc.json`。`rdb()` 仍不可用时，再设 `ASSESSMENT_PG_URL` 为 SQL 数据库连接串，同样只放环境变量。
 
-文档 `_id` 使用 `reportId`。启动时尝试创建集合，并尝试两个唯一索引：`reportId`、`sourceSubmissionId`。SDK 没有 `createIndex` 或创建失败时，函数仍启动，并在日志里标 `indexFallback: true`。这时要在控制台手工建这两个唯一索引。
-
-### 部署前要先开通文档型数据库
-
-2026-10-20 用 manager-node 查了环境 `root-journey-prod-d4d7pzd0a8f805`：
-
-- `EnvInfo.Databases` 为 null / []
-- `checkCollectionExists` 返回「当前环境未开通文档型数据库」
-- `DescribeDbDistribution` 有时返回「The Env Is Initializing, Please Try It Later」
-- 个人版 `baas_personal` 套餐明细里已经包含文档库，`CollectionLimits=100`。不是缺套餐，不需要升级，也不需要购买资源包
-
-文档型数据库未开通或仍在初始化时，创建集合会失败，函数会退出，不会改用内存库。Mac 上先在控制台确认文档型数据库已开通，再创建集合 `assessment_reports_dev`，然后部署。操作步骤、环境变量和 curl 写在 `cloud/assessment-report/DEPLOY.md`。
-
-2026-10-19 的只读探测仍然有效：`GET /asva-api/api/health` 是生产服务，本轮没有调用它的写接口，也没有改这个函数。`assessmentReportDev` 当时还未部署。
+2026-10-19 的只读探测仍然有效：`GET /asva-api/api/health` 是生产服务，本轮没有调用它的写接口，也没有改这个函数。
 
 ### 部署环境变量
 
 | 变量 | 值 |
 |---|---|
 | `ASSESSMENT_COLLECTION` | `assessment_reports_dev` |
-| `ASSESSMENT_STORE_DRIVER` | `cloudbase` |
+| `ASSESSMENT_STORE_DRIVER` | `postgres` |
 | `ASSESSMENT_CLOUDBASE_WRITE_CONFIRM` | `dev-isolated` |
 | `ASSESSMENT_DEPLOY_CONFIRM` | `dev-isolated` |
 | `FEISHU_INDEX_MODE` | `off` |
@@ -117,11 +119,11 @@ tcb fn deploy assessmentReportDev --httpFn --path /assessmentReportDev --dir . \
 
 ### 合成 curl
 
-`GET /assessmentReportDev/health` 应返回 `store: "cloudbase"`、`deployed: true`、`feishu: "off"`、`collection: "assessment_reports_dev"`。
+`GET /assessmentReportDev/health` 应返回 `store: "postgres"`、`deployed: true`、`feishu: "off"`、`collection: "assessment_reports_dev"`。
 
 然后对 `/assessmentReportDev/v1/results`、`/v1/results/read`、`/v1/results/revoke` 做一轮合成数据（提交、同一份再提交、另一份正文撞同一提交号得到 409、读取、撤销、再读得到 410 且正文没有词）。完整命令和生成合成 JSON 的脚本在 `cloud/assessment-report/DEPLOY.md`。
 
-跨请求持久化：留下一份未撤销的报告，在控制台看到对应文档后，等实例缩到 0 或重新部署，再读同一 `reportId`。仍返回 200 和同一组词，才说明数据在文档库里。内存库在新进程上这次读取会是 404。
+跨请求持久化：留下一份未撤销的报告，在 SQL 数据库里能查到它的 `report_id` 之后，等实例缩到 0 或重新部署，再读同一 `reportId`。仍返回 200 和同一组词，才说明行在 PostgreSQL 里。内存库在新进程上这次读取会是 404。
 
 `js/assessment-cloud-config.mjs` 的 `endpoint` 保持为空，curl 通过之前不要写上函数地址。
 
@@ -133,7 +135,7 @@ tcb fn deploy assessmentReportDev --httpFn --path /assessmentReportDev --dir . \
 
 不使用生活小调查的妙搭 webhook。ASVA 现用飞书应用是 `cli_aaff6cb53db89bd3`（与解忧小屋同一应用，见 `asva-workbench` 的 `.env.example`）。小调查应用 `cli_aa3e5840a3f89d2b` 不用于测评。
 
-报告 ID 的唯一性由 CloudBase 服务端保证，不靠飞书文本字段的唯一属性。
+报告 ID 的唯一性由 PostgreSQL 主键 `report_id` 保证，不靠飞书文本字段的唯一属性。
 
 | # | 字段 | 类型 | 空 | 写入来源 |
 |---|---|---|---|---|
@@ -223,7 +225,7 @@ https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.c
 npm test
 ```
 
-覆盖：ECR、SCL-90、PDQ-4 原有计分测试；六芒星协议不含分数；未同意不提交；同一提交号幂等与冲突；换词序产生新报告且旧链接不变；错误秘密与不存在都是 404；撤销后 410 且正文没有词；飞书默认关闭；mock 镜像失败、重试、同一报告 ID 不新增行；撤销不改变归档状态；多次失败后标记失败但报告仍可读取；live 未确认时不调用 writer；管理员缺密钥为 404；归档必须手填客户 ID，重复归档不新增，不按昵称合并；超限 429、过大 413、错误来源 403；其他测评页面没有引用云端块。CloudBase 驱动用 mock 客户端覆盖插入幂等、唯一键冲突、更新，以及文档库未开通或初始化中时拒绝启动。没有云函数身份时不会去连真实环境。部署入口在确认开关打开后拒绝内存库和飞书 live。词表快照与 `star/js/data.js` 一致。
+覆盖：ECR、SCL-90、PDQ-4 原有计分测试；六芒星协议不含分数；未同意不提交；同一提交号幂等与冲突；换词序产生新报告且旧链接不变；错误秘密与不存在都是 404；撤销后 410 且正文没有词；飞书默认关闭；mock 镜像失败、重试、同一报告 ID 不新增行；撤销不改变归档状态；多次失败后标记失败但报告仍可读取；live 未确认时不调用 writer；管理员缺密钥为 404；归档必须手填客户 ID，重复归档不新增，不按昵称合并；超限 429、过大 413、错误来源 403；其他测评页面没有引用云端块。PostgreSQL 驱动用 mock 覆盖插入幂等、唯一键冲突、更新，以及表不存在时返回建表 SQL。没有云函数身份时不会去连真实环境。部署入口在确认开关打开后拒绝内存库和飞书 live。词表快照与 `star/js/data.js` 一致。
 
 浏览器里用合成的六芒星结果走通了：不勾选不请求、断网后再试仍是同一份、H5 读到同一组词、撤销后只剩失效页。ECR 页面没有这块同意。
 
@@ -231,7 +233,7 @@ npm test
 
 - 真微信里打开和转发
 - 真飞书建表与写入。飞书保持 off
-- Mac 上开通文档型数据库、创建集合 `assessment_reports_dev`、执行 `tcb fn deploy`、用 curl 做真实闭环。本环境没有代替执行
+- Mac 上在 SQL 数据库执行建表 SQL、执行 `tcb fn deploy`、用 curl 做真实闭环。本环境没有代替执行
 - 生产 ASVA 工作台改动
 - 其他 12 个测评接入
 
@@ -243,15 +245,7 @@ npm test
 
 ## 9. 预计资源消耗
 
-价格按腾讯云 CloudBase 上海地域公开标价估算（文档型数据库 200 点/万次调用、40 点/GB/天；云函数 13.3 点/万次、0.11108 点/GBs；外网出流量 800 点/GB）。个人版套餐是 40000 点/月。控制台此前约 927/40000，本轮没有重新登录核对余额。
-
-一份报告走完「保存 + 打开一次 + 撤销」，大约 8 次数据库调用、3 次函数调用，正文约 3KB：
-
-- 数据库调用约 0.16 点
-- 函数调用与 256MB 短时运行约 0.02 点
-- 出流量约 0.01 点
-
-合计大约 **0.2 点/份**。一千份大约 200 点。一千份存 30 天，容量大约 0.1 点/天。这个量级不需要购买资源包，也不需要升级套餐。
+这个环境的用量里已经有 PostgreSQL。本轮不购买资源包，不改套餐。函数仍按短时、最小实例 0 来部署。一份报告大约 3KB，三次函数调用的量级相对个人版额度很小。之前按文档接口估算的 0.2 点/份不适用于现在这条 PostgreSQL 路径。
 
 这还不包含一个常驻函数的空转。所以隔离函数若要部署，必须能缩到 0 实例，并且不能改动已经在跑的 `asva-api`。
 
