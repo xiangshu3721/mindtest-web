@@ -182,7 +182,15 @@ PostgreSQL 写入成功、飞书失败时，文档的 `feishuSync` 是「待重�
 
 ## 5. H5 测试地址
 
-隔离函数已由操作者部署，合成闭环已通过。公开基址是上面的 `/assessment-report-dev`。GitHub Pages 还没有这份前端：分支未合并，线上作答页还不会调用这个 endpoint。阅读页地址要等发布后才是 `https://xiangshu3721.github.io/mindtest-web/r/#rpt_<id>.<secret>`。未经用户同意不合并、不发布。
+不合并 `main` 的手机地址：
+
+```text
+https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessment-report-dev/preview/
+```
+
+它挂在已经存在的函数路径下面，只含职业六芒星和阅读页。阅读链接是 `.../preview/r/#rpt_<id>.<secret>`。正式 GitHub Pages 仍从 `main` 发布，这次不用它做验收。`js/assessment-cloud-config.mjs` 的 `reportPageBase` 仍是 `https://xiangshu3721.github.io/mindtest-web/r/`。预览包里的配置单独指向 `preview/r/`。
+
+这个地址要等操作者按 `cloud/assessment-report/DEPLOY.md` 重新部署 `assessmentReportDev` 之后才打得开。部署时飞书保持 `off`。允许来源已加上 `https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com`。点选步骤在 `E2E_BROWSER_WECHAT.md`。
 
 本地隔离服务：
 
@@ -190,35 +198,13 @@ PostgreSQL 写入成功、飞书失败时，文档的 `feishuSync` 是「待重�
 node cloud/assessment-report/local-server.mjs
 ```
 
-然后打开 `http://127.0.0.1:4173/star/index.html`。同意并生成链接后，地址形如：
+然后打开 `http://127.0.0.1:4173/star/index.html`。本机默认内存库。手机验收以线上预览页为准。微信分享标题使用阅读页里写死的「ASVA 测评报告」。
 
-```text
-http://127.0.0.1:4173/r/#rpt_<id>.<secret>
-```
+## 6. ASVA 导入先停
 
-线上页面是 `https://xiangshu3721.github.io/mindtest-web/r/#rpt_<id>.<secret>`。`js/assessment-cloud-config.mjs` 的 `endpoint` 已指向隔离函数 `/assessment-report-dev`，`reportPageBase` 指向上面的 `r/`。微信分享标题使用页面里写死的「ASVA 测评报告」。
+2026-10-21 起，当前阶段只做测评基础设施。客户档案、导师工作台、导入、客户 ID 关联、审核、画像和 AI 分析先不做。不跨仓库改 `asva-workbench`，也不改线上 `asva-api`。
 
-## 6. ASVA 导入现状
-
-正确仓库是公开仓 `xiangshu3721/asva-workbench`，默认分支 `master`。线上 API 是：
-
-```text
-https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/asva-api
-```
-
-本轮没有改这个仓库，没有改生产 ASVA。工作台 README 写明导师账号不能登录，导入操作者仍是管理员。
-
-客户原始资料仍应走现有 `SourceRecord`。在该仓确认新的 `source_type` 之前，草稿使用 `IMPORTED_TEXT`，标题以「测评报告」开头。`content_hash` 按 reportId 加协议正文计算，同一客户重复导入返回已有 `source_id`。`linkSecret` 不进入 `raw_text` 或 `notes`。客户事实字段列表保持为空。
-
-本地原型：`tools/asva-import-preview.html`。它调用本仓的管理员读取和归档接口。归档接口只更新隔离库里的「客户归档状态」和关联客户 ID。
-
-以后要在 `asva-workbench` 做的事，不在本轮：
-
-- 客户页增加「从测评报告导入」，粘贴完整链接
-- 服务端拿 `ASVA_REPORT_IMPORT_KEY` 调用 `POST /v1/integrations/asva/read`
-- 管理员选定客户并确认后写一条 SourceRecord，不覆盖客户字段
-- 环境变量只放在 CloudBase，不进前端包
-- 按该仓已有纪律，先 Staging，再考虑生产
+`tools/asva-import-preview.html` 还在，作为独立原型留着。不再开发、不再联调、不再部署，首页也不链到它。标准化报告读取接口 `POST /v1/integrations/asva/read` 保留。归档和客户 ID 不进入这一阶段的验收。
 
 ## 7. 测试结果与遗留
 
@@ -234,10 +220,10 @@ npm test
 
 遗留，本轮不做：
 
-- 真机浏览器和微信内打开、转发。步骤在 `E2E_BROWSER_WECHAT.md`，还没走
+- 真机浏览器和微信内打开、转发。步骤在 `E2E_BROWSER_WECHAT.md`。预览地址要操作者重新部署函数后才打得开
 - 真飞书建表与写入。还没有「ASVA 测评数据」的链接。飞书保持 off
 - 合并 `main`、发布 GitHub Pages。未经用户同意不做
-- 生产 ASVA 工作台改动
+- ASVA 客户档案、导入、客户 ID、审核、画像和 AI 分析
 - 其他 12 个测评接入
 
 ## 8. 实测存储大小

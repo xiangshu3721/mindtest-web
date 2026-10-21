@@ -17,6 +17,36 @@ HTTP 路径：`/assessment-report-dev`
 https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessment-report-dev
 ```
 
+## 手机验收页（不合并 main）
+
+作答页：
+
+```text
+https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessment-report-dev/preview/
+```
+
+阅读页基址是同一路径下的 `preview/r/`。正式 GitHub Pages 仍从 `main` 发布，这份预览不走 Pages，也不新建静态托管，不覆盖已有路径。页面文件放在函数目录 `preview-site/`，只含职业六芒星和阅读页。
+
+这个地址要等下面这次重新部署之后，手机才打得开。部署前线上函数还是上一版，没有 `/preview/`。
+
+谁来做：已经登录 CloudBase 的操作者，在 Mac 上执行。本代理不登录、不部署。
+
+```bash
+git fetch origin cursor/star-cloud-archive-v1-46b1
+git checkout cursor/star-cloud-archive-v1-46b1
+cd cloud/assessment-report
+npm install
+node build-preview.mjs
+tcb fn deploy assessmentReportDev --httpFn --path /assessment-report-dev --dir . \
+  --runtime Nodejs20.19 --timeout 60 --memory 256 --install-dependency false
+```
+
+部署时不要改 `FEISHU_INDEX_MODE`，保持 `off`。不要部署或更新 `asva-api`。不要执行 `tcb hosting deploy`，不要开通新的托管，不要购买资源包。
+
+部署后用手机打开上面的预览地址，应看到「打开职业六芒星」。健康检查仍是 `feishu: off`。点选步骤在 `docs/assessment-cloud-v1/E2E_BROWSER_WECHAT.md`。
+
+浏览器会带上来源 `https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com`。这一版代码已把它写进允许列表，和 `https://xiangshu3721.github.io` 并列。允许的是这个来源本身，不是任意网站。
+
 这个环境的侧栏是 SQL 数据库（PostgreSQL）。隔离数据是表 `assessment_reports_dev`。云函数用 `@cloudbase/node-sdk` 的 `rdb()` 访问，不使用 SecretId / SecretKey。下面的开关不是密钥。不要把 `ASVA_REPORT_IMPORT_KEY`、飞书应用密钥、`CLOUDBASE_APIKEY`、数据库连接串写进 Git。
 
 ## 先在 SQL 数据库建表

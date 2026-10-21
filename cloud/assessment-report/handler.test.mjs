@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { WORDS } from "../../star/js/data.js";
 import { buildStarResult } from "../../star/js/cloud-payload.js";
@@ -9,7 +11,9 @@ import { createFeishuHttpWriter, createFeishuIndex, feishuLiveReady, MIRROR_FIEL
 import { assertDevCollection, randomSecret } from "./lib/ids.mjs";
 import { buildImportDraft } from "./lib/import-draft.mjs";
 import { deployBlockReason } from "./index.mjs";
-import { startLocalServer } from "./local-server.mjs";
+import { HTTP_ORIGIN, PREVIEW_REPORT_BASE } from "./lib/preview.mjs";
+import { buildPreview } from "./build-preview.mjs";
+import { normalizeRequestPath, resolveStatic, startLocalServer } from "./local-server.mjs";
 
 function ids() {
   return {
@@ -774,6 +778,63 @@ test("本地 HTTP 默认内存库，函数前缀下的健康检查同样可读",
       if (value == null) delete process.env[key];
       else process.env[key] = value;
     }
+  }
+});
+
+test("手机预览只带六芒星，阅读页指向 preview，来源加入白名单", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "star-preview-"));
+  await buildPreview(dir);
+  const config = await readFile(path.join(dir, "js/assessment-cloud-config.mjs"), "utf8");
+  assert.match(config, new RegExp(HTTP_ORIGIN.replaceAll(".", "\\.")));
+  assert.match(config, /\/assessment-report-dev\/preview\/r\//);
+  assert.equal(config.includes(PREVIEW_REPORT_BASE), true);
+  const home = await readFile(path.join(dir, "index.html"), "utf8");
+  assert.match(home, /打开职业六芒星/);
+  assert.equal(home.includes("asva-import"), false);
+  const star = await readFile(path.join(dir, "star/index.html"), "utf8");
+  assert.match(star, /noindex/);
+  for (const rel of ["star/js/app.js", "star/js/data.js", "js/cloud-kit.js", "r/index.html", "js/assessment-cloud-config.mjs"]) {
+    const fresh = await readFile(path.join(dir, rel), "utf8");
+    const committed = await readFile(new URL(`./preview-site/${rel}`, import.meta.url), "utf8");
+    assert.equal(committed, fresh, rel);
+  }
+  const production = await readFile(new URL("../../js/assessment-cloud-config.mjs", import.meta.url), "utf8");
+  assert.equal(production.includes("/preview/r/"), false);
+
+  assert.equal(normalizeRequestPath("/assessment-report-dev/preview/star/index.html"), "/preview/star/index.html");
+  assert.equal(resolveStatic("/preview/../.env", { deployed: true }), null);
+  assert.equal(resolveStatic("/star/index.html", { deployed: true }), null);
+  assert.equal(resolveStatic("/star/index.html", { deployed: false }).endsWith(`${path.sep}star${path.sep}index.html`), true);
+
+  const { handle } = app();
+  const allowed = await handle({
+    method: "POST",
+    path: "/v1/results",
+    headers: { origin: HTTP_ORIGIN },
+    body: {},
+    ip: "203.0.113.90",
+    now: 9_000,
+  });
+  assert.equal(allowed.status, 422);
+  assert.equal(allowed.headers["access-control-allow-origin"], HTTP_ORIGIN);
+
+  const server = await startLocalServer({ host: "127.0.0.1", port: 0, deployed: true });
+  try {
+    const port = server.address().port;
+    const page = await fetch(`http://127.0.0.1:${port}/assessment-report-dev/preview/`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /打开职业六芒星/);
+    const hidden = await fetch(`http://127.0.0.1:${port}/star/index.html`);
+    assert.equal(hidden.status, 404);
+    const cross = await fetch(`http://127.0.0.1:${port}/v1/results`, {
+      method: "POST",
+      headers: { origin: HTTP_ORIGIN, "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(cross.status, 422);
+    assert.equal(cross.headers.get("access-control-allow-origin"), HTTP_ORIGIN);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });
 

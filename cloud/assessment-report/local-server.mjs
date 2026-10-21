@@ -7,18 +7,48 @@ import { createHandler } from "./lib/handler.mjs";
 import { createCloudBaseStore, createMemoryStore, isCloudStoreDriver } from "./lib/store.mjs";
 import { createFeishuIndex } from "./lib/feishu.mjs";
 import { assertDevCollection } from "./lib/ids.mjs";
+import { GITHUB_PAGES_ORIGIN, HTTP_ORIGIN } from "./lib/preview.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, "../..");
+const previewRoot = path.join(here, "preview-site");
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 4173);
 const collection = assertDevCollection(process.env.ASSESSMENT_COLLECTION || "assessment_reports_dev");
 
 export function normalizeRequestPath(pathname) {
-  const pathOnly = String(pathname || "/").split("?")[0];
-  const prefix = "/assessmentReportDev";
-  if (pathOnly === prefix) return "/";
-  if (pathOnly.startsWith(`${prefix}/`)) return pathOnly.slice(prefix.length) || "/";
+  let pathOnly = String(pathname || "/").split("?")[0];
+  for (const prefix of ["/assessment-report-dev", "/assessmentReportDev"]) {
+    if (pathOnly === prefix) return "/";
+    if (pathOnly.startsWith(`${prefix}/`)) {
+      pathOnly = pathOnly.slice(prefix.length) || "/";
+      break;
+    }
+  }
   return pathOnly;
+}
+
+function blocked(urlPath) {
+  return String(urlPath || "").split("/").some((part) => part === ".." || part.startsWith("."));
+}
+
+export function resolveStatic(pathname, { deployed = false, repoRoot = root, siteRoot = previewRoot } = {}) {
+  const normal = path.posix.normalize(String(pathname || "/"));
+  if (!normal.startsWith("/") || blocked(pathname) || blocked(normal)) return null;
+  if (normal === "/preview" || normal.startsWith("/preview/")) {
+    let rel = normal.slice("/preview".length);
+    if (!rel || rel === "/") rel = "/index.html";
+    const filePath = path.resolve(siteRoot, `.${rel}`);
+    const site = path.resolve(siteRoot);
+    if (filePath !== site && !filePath.startsWith(`${site}${path.sep}`)) return null;
+    return filePath;
+  }
+  if (deployed) return null;
+  const rel = normal === "/" ? "/index.html" : normal;
+  const filePath = path.resolve(repoRoot, `.${rel}`);
+  const repo = path.resolve(repoRoot);
+  if (filePath !== repo && !filePath.startsWith(`${repo}${path.sep}`)) return null;
+  return filePath;
 }
 
 async function openStore() {
@@ -43,7 +73,8 @@ function makeHandler(host, port, store, deployed) {
     importKey: process.env.ASVA_REPORT_IMPORT_KEY || "",
     publicReportBase: process.env.PUBLIC_REPORT_BASE || `http://${host}:${port}/r/`,
     allowedOrigins: [
-      "https://xiangshu3721.github.io",
+      GITHUB_PAGES_ORIGIN,
+      HTTP_ORIGIN,
       `http://${host}:${port}`,
       `http://127.0.0.1:${port}`,
       `http://localhost:${port}`,
@@ -64,11 +95,6 @@ const TYPES = {
   ".webp": "image/webp",
 };
 
-function blocked(urlPath) {
-  const normal = path.posix.normalize(urlPath);
-  return normal.includes("..") || normal.split("/").some((part) => part.startsWith("."));
-}
-
 function sendJson(res, response) {
   const headers = { ...response.headers };
   if (response.body == null) {
@@ -82,9 +108,8 @@ function sendJson(res, response) {
   res.end(raw);
 }
 
-export async function startLocalServer({ host = HOST, port = PORT } = {}) {
+export async function startLocalServer({ host = HOST, port = PORT, deployed = process.env.ASSESSMENT_DEPLOY_CONFIRM === "dev-isolated" } = {}) {
   const store = await openStore();
-  const deployed = process.env.ASSESSMENT_DEPLOY_CONFIRM === "dev-isolated";
   const handler = makeHandler(host, port, store, deployed);
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || "/", `http://${host}:${port}`);
@@ -103,23 +128,29 @@ export async function startLocalServer({ host = HOST, port = PORT } = {}) {
       sendJson(res, response);
       return;
     }
-    if (blocked(url.pathname)) {
-      res.writeHead(404);
+    const filePath = resolveStatic(pathname, { deployed });
+    if (!filePath) {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
       res.end("not found");
       return;
     }
-    const rel = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
-    const filePath = path.join(root, rel);
-    if (!filePath.startsWith(root)) {
-      res.writeHead(404);
-      res.end("not found");
-      return;
-    }
+    const base = pathname === "/preview" || pathname.startsWith("/preview/") ? previewRoot : root;
     try {
       const info = await stat(filePath);
       const finalPath = info.isDirectory() ? path.join(filePath, "index.html") : filePath;
+      const resolved = path.resolve(finalPath);
+      const allowed = path.resolve(base);
+      if (resolved !== allowed && !resolved.startsWith(`${allowed}${path.sep}`)) {
+        res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+        res.end("not found");
+        return;
+      }
       const type = TYPES[path.extname(finalPath)] || "application/octet-stream";
-      res.writeHead(200, { "content-type": type, "cache-control": "no-store" });
+      res.writeHead(200, {
+        "content-type": type,
+        "cache-control": "no-store",
+        "x-robots-tag": "noindex",
+      });
       createReadStream(finalPath).pipe(res);
     } catch {
       res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });

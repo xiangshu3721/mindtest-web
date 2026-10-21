@@ -1,6 +1,7 @@
 import { byteSize, canonical, safeEqual, sha256 } from "./ids.mjs";
 import { MAX_BODY_BYTES, validateSecrets, validateStarResult } from "./validate.mjs";
 import { indexRow } from "./feishu.mjs";
+import { GITHUB_PAGES_ORIGIN, HTTP_ORIGIN } from "./preview.mjs";
 
 const DUMMY_HASH = "0".repeat(64);
 
@@ -55,7 +56,8 @@ export function createHandler(options) {
   const store = options.store;
   const feishu = options.feishu;
   const allowedOrigins = options.allowedOrigins || [
-    "https://xiangshu3721.github.io",
+    GITHUB_PAGES_ORIGIN,
+    HTTP_ORIGIN,
     "http://127.0.0.1:4173",
     "http://localhost:4173",
   ];

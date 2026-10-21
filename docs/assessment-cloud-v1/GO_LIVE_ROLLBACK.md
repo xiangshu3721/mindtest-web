@@ -5,7 +5,7 @@
 ## 上线顺序
 
 1. 隔离函数已经在 `assessment-report-dev`。健康检查是 `store=postgres`、`feishu=off`。这一步不要再部署别的函数，不要动 `asva-api`。
-2. 前端配置已经指向该函数和 `https://xiangshu3721.github.io/mindtest-web/r/`。GitHub Pages 要等用户同意合并并发布后，线上作答页才会带上这个地址。合并本身不是本文件的授权。
+2. 不合并 `main` 时，手机验收打开函数上的预览页：`https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessment-report-dev/preview/`。这要操作者按 `cloud/assessment-report/DEPLOY.md` 重新部署 `assessmentReportDev` 之后才打得开。正式 GitHub Pages 仍等用户同意合并后再发布。合并本身不是本文件的授权。仓库里 `js/assessment-cloud-config.mjs` 的阅读页基址仍是 `https://xiangshu3721.github.io/mindtest-web/r/`。预览包自己的配置指向 `preview/r/`。
 3. 飞书继续 `FEISHU_INDEX_MODE=off`。等用户给出「ASVA 测评数据」的链接，并按 `FEISHU_ACL.md` 用普通协作者账号核对通过，再建「ASVA 测评记录」。
 4. 表和权限都就绪之后，才在函数环境变量里填 `FEISHU_APP_TOKEN`、`FEISHU_ASSESSMENT_TABLE_ID`、`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_INDEX_LIVE_CONFIRM=YES`，然后把 `FEISHU_INDEX_MODE` 改为 `live` 并重启函数。凭证不进 Git。缺任何一项时，进程拒绝以 live 启动。
 5. 用合成昵称走一遍保存。PostgreSQL 里有行，飞书里同一报告 ID 只有一行。再调用一次补偿入口，行数仍然是一。
