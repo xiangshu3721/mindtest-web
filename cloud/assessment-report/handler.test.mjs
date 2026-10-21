@@ -1,0 +1,847 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { WORDS } from "../../star/js/data.js";
+import { buildStarResult } from "../../star/js/cloud-payload.js";
+import { createHandler } from "./lib/handler.mjs";
+import { createCloudBaseStore, createMemoryStore, tableSql } from "./lib/store.mjs";
+import { createFeishuHttpWriter, createFeishuIndex, feishuLiveReady, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
+import { assertDevCollection, randomSecret } from "./lib/ids.mjs";
+import { buildImportDraft } from "./lib/import-draft.mjs";
+import { deployBlockReason } from "./index.mjs";
+import { HTTP_ORIGIN, PREVIEW_REPORT_BASE } from "./lib/preview.mjs";
+import { buildPreview } from "./build-preview.mjs";
+import { normalizeRequestPath, resolveStatic, startLocalServer } from "./local-server.mjs";
+
+function ids() {
+  return {
+    reportId: `rpt_${randomSecret(18)}`,
+    clientSubmissionId: `sub_${randomSecret(18)}`,
+    linkSecret: randomSecret(32),
+    ownerToken: randomSecret(32),
+  };
+}
+
+function result(extra = {}, id = ids()) {
+  const drive = extra.drive || WORDS.slice(28);
+  const pursue = extra.pursue || WORDS.slice(0, 3);
+  const payload = buildStarResult({
+    nickname: "小林",
+    driveOrder: drive,
+    pursueOrder: pursue,
+    cull1: WORDS.slice(0, 15),
+    cull2: WORDS.slice(15, 25),
+    cull3: WORDS.slice(25, 28),
+    revived: pursue,
+    completedAt: "2026-10-19T16:00:00+08:00",
+    ...id,
+  });
+  return { payload, ...id };
+}
+
+function app(options = {}) {
+  const feishu = options.feishu || createFeishuIndex({ FEISHU_INDEX_MODE: options.mode || "off" });
+  const handler = createHandler({
+    store: createMemoryStore("assessment_reports_dev"),
+    feishu,
+    importKey: "test-import-key",
+    publicReportBase: "http://127.0.0.1:4173/r/",
+    deployed: options.deployed === true,
+    silent: true,
+  });
+  return { ...handler, feishu };
+}
+
+async function post(handler, path, body, extra = {}) {
+  return handler.handle({
+    method: "POST",
+    path,
+    headers: extra.headers || {},
+    body,
+    ip: extra.ip || "203.0.113.10",
+    now: extra.now || 1_000,
+  });
+}
+
+test("词表只有一份，服务端再导出的就是六芒星页面上的 31 个词", async () => {
+  const serverWords = (await import("./words.mjs")).WORDS;
+  const bundledWords = (await import("./vendor/star-data.js")).WORDS;
+  assert.deepEqual(serverWords, WORDS);
+  assert.deepEqual(bundledWords, WORDS);
+  assert.equal(WORDS.length, 31);
+});
+
+test("默认不写飞书，云端仍能保存、读取和撤销", async () => {
+  const { handle, store, feishu, logs } = app();
+  const made = result();
+  const created = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  });
+  assert.equal(created.status, 200);
+  assert.equal(created.body.index, "off");
+  assert.equal(created.body.collection, "assessment_reports_dev");
+  assert.equal(store.size(), 1);
+  assert.equal(feishu.rows.length, 0);
+  assert.ok(created.body.byteSize > 500 && created.body.byteSize < 8000);
+  assert.equal(created.body.reportUrl.includes(made.linkSecret), true);
+  assert.equal(created.body.reportUrl.includes("?"), false);
+
+  const again = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  });
+  assert.equal(again.status, 200);
+  assert.equal(store.size(), 1);
+
+  const read = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  });
+  assert.equal(read.status, 200);
+  assert.deepEqual(read.body.dimensions.map((item) => item.score), [null, null]);
+  assert.equal(JSON.stringify(read.body).includes(made.linkSecret), false);
+  assert.equal(JSON.stringify(read.body).includes(made.ownerToken), false);
+
+  const missing = await post({ handle }, "/v1/results/read", {
+    reportId: `rpt_${"a".repeat(20)}`, linkSecret: made.linkSecret,
+  });
+  const wrong = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: randomSecret(32),
+  });
+  assert.equal(missing.status, 404);
+  assert.deepEqual(wrong.body, missing.body);
+
+  const revoked = await post({ handle }, "/v1/results/revoke", {
+    reportId: made.reportId, ownerToken: made.ownerToken,
+  });
+  assert.equal(revoked.status, 200);
+  assert.equal(revoked.body.archiveStatus, "未归档");
+  const after = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  });
+  assert.equal(after.status, 410);
+  assert.deepEqual(after.body, { error: "revoked" });
+  assert.equal(JSON.stringify(logs).includes("小林"), false);
+  assert.equal(JSON.stringify(logs).includes(made.linkSecret), false);
+});
+
+test("同一提交号内容变了不会覆盖，换词序是新报告，旧链接不变", async () => {
+  const { handle } = app();
+  const first = result();
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: first.payload, linkSecret: first.linkSecret, ownerToken: first.ownerToken,
+  })).status, 200);
+  const changed = buildStarResult({
+    nickname: "小林",
+    driveOrder: [first.payload.reportContent.viewModel.driveOrder[1], first.payload.reportContent.viewModel.driveOrder[0], first.payload.reportContent.viewModel.driveOrder[2]],
+    pursueOrder: first.payload.reportContent.viewModel.pursueOrder,
+    completedAt: first.payload.completedAt,
+    reportId: first.reportId,
+    clientSubmissionId: first.clientSubmissionId,
+  });
+  const conflict = await post({ handle }, "/v1/results", {
+    result: changed, linkSecret: first.linkSecret, ownerToken: first.ownerToken,
+  });
+  assert.equal(conflict.status, 409);
+  const second = result({ drive: changed.reportContent.viewModel.driveOrder, pursue: changed.reportContent.viewModel.pursueOrder });
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: second.payload, linkSecret: second.linkSecret, ownerToken: second.ownerToken,
+  }, { ip: "203.0.113.11" })).status, 200);
+  const oldRead = await post({ handle }, "/v1/results/read", {
+    reportId: first.reportId, linkSecret: first.linkSecret,
+  });
+  assert.deepEqual(oldRead.body.reportContent.viewModel.driveOrder, first.payload.reportContent.viewModel.driveOrder);
+});
+
+test("飞书镜像按报告 ID 幂等，失败后重试，撤销不改归档状态", async () => {
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock", failTimes: 1 });
+  const { handle, store, retryMirrors } = app({ feishu });
+  const made = result();
+  const created = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  });
+  assert.equal(created.body.index, "待重试");
+  assert.equal(feishu.rows.length, 0);
+  assert.equal(store.size(), 1);
+  const readable = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  });
+  assert.equal(readable.status, 200);
+
+  const retried = await retryMirrors();
+  assert.equal(retried[0].feishuSync, "已同步");
+  assert.equal(feishu.rows.length, 1);
+  assert.deepEqual(Object.keys(feishu.rows[0]), MIRROR_FIELDS);
+  assert.equal(feishu.rows[0]["报告状态"], "有效");
+  assert.equal(feishu.rows[0]["客户归档状态"], "未归档");
+  assert.equal(feishu.rows[0]["同步状态"], "已同步");
+  assert.equal(feishu.rows[0]["核心结果摘要"].length <= 120, true);
+  assert.equal(JSON.stringify(feishu.rows[0]).includes(made.linkSecret), false);
+  assert.equal(JSON.stringify(feishu.rows[0]).includes("cull1"), false);
+  assert.equal(TABLE_NAME, "ASVA 测评记录");
+
+  const again = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  });
+  assert.equal(again.status, 200);
+  assert.equal(feishu.rows.length, 1);
+
+  feishu.failNext(1);
+  const revoked = await post({ handle }, "/v1/results/revoke", {
+    reportId: made.reportId, ownerToken: made.ownerToken,
+  });
+  assert.equal(revoked.status, 200);
+  assert.equal(feishu.rows[0]["报告状态"], "有效");
+  const doc = await store.getByReportId(made.reportId);
+  assert.equal(doc.shareStatus, "revoked");
+  assert.equal(doc.feishuSync, "待重试");
+  assert.equal(doc.archiveStatus, "未归档");
+  await retryMirrors();
+  assert.equal(feishu.rows.length, 1);
+  assert.equal(feishu.rows[0]["报告状态"], "已撤销");
+  assert.equal(feishu.rows[0]["客户归档状态"], "未归档");
+});
+
+test("飞书 live 未确认时不调用 writer，报告仍在", async () => {
+  let called = 0;
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "live" }, async () => { called += 1; });
+  const { handle } = app({ feishu });
+  const made = result();
+  const created = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  });
+  assert.equal(created.status, 200);
+  assert.equal(created.body.index, "待重试");
+  assert.equal(called, 0);
+});
+
+test("报告已入库后飞书连续失败保持待重试，补偿成功后同一报告只有一行", async () => {
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock", failTimes: 2 });
+  const { handle, store } = app({ feishu, deployed: true });
+  const made = result();
+  const created = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  }, { ip: "203.0.113.70" });
+  assert.equal(created.status, 200);
+  assert.equal(created.body.index, "待重试");
+  assert.equal((await store.getByReportId(made.reportId)).feishuSync, "待重试");
+  assert.equal(feishu.rows.length, 0);
+  const readable = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  }, { ip: "203.0.113.71" });
+  assert.equal(readable.status, 200);
+
+  const hidden = await post({ handle }, "/v1/integrations/feishu/retry", {}, { ip: "203.0.113.72" });
+  assert.equal(hidden.status, 404);
+  const garbage = await handle({
+    method: "POST",
+    path: "/v1/integrations/feishu/retry",
+    headers: {},
+    rawBody: "not-json",
+    ip: "203.0.113.72",
+    now: 1_000,
+  });
+  assert.equal(garbage.status, 404);
+  const closed = app({ feishu, deployed: false });
+  const locked = await post(closed, "/v1/integrations/feishu/retry", {}, {
+    headers: { authorization: "Bearer test-import-key" },
+    ip: "203.0.113.73",
+  });
+  assert.equal(locked.status, 404);
+
+  const still = await post({ handle }, "/v1/integrations/feishu/retry", {}, {
+    headers: { authorization: "Bearer test-import-key" },
+    ip: "203.0.113.74",
+  });
+  assert.equal(still.status, 200);
+  assert.equal(still.body.pending, 1);
+  assert.equal(feishu.rows.length, 0);
+  assert.equal((await store.getByReportId(made.reportId)).feishuSync, "待重试");
+
+  const done = await post({ handle }, "/v1/integrations/feishu/retry", {}, {
+    headers: { authorization: "Bearer test-import-key" },
+    ip: "203.0.113.75",
+  });
+  assert.equal(done.status, 200);
+  assert.equal(done.body.synced, 1);
+  assert.equal(done.body.retried, 1);
+  assert.equal(feishu.rows.length, 1);
+  assert.equal(feishu.rows[0]["报告 ID"], made.reportId);
+  assert.equal(JSON.stringify(done.body).includes(made.linkSecret), false);
+  assert.equal((await store.getByReportId(made.reportId)).feishuSync, "已同步");
+
+  const idle = await post({ handle }, "/v1/integrations/feishu/retry", {}, {
+    headers: { authorization: "Bearer test-import-key" },
+    ip: "203.0.113.76",
+  });
+  assert.equal(idle.body.retried, 0);
+  assert.equal(feishu.rows.length, 1);
+});
+
+test("飞书 writer 按报告 ID 更新，不新建第二行", async () => {
+  const records = [];
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, method: init.method, body });
+    if (url.endsWith("/tenant_access_token/internal")) {
+      assert.equal(body.app_secret, "test-secret");
+      return { json: async () => ({ code: 0, tenant_access_token: "token-1", expire: 7200 }) };
+    }
+    if (url.endsWith("/records/search")) {
+      return { json: async () => ({ code: 0, data: { items: records.map((item) => ({ record_id: item.id, fields: item.fields })) } }) };
+    }
+    if (init.method === "POST" && url.endsWith("/records")) {
+      records.push({ id: "rec_1", fields: body.fields });
+      return { json: async () => ({ code: 0, data: { record: { record_id: "rec_1" } } }) };
+    }
+    if (init.method === "PUT") {
+      records[0].fields = body.fields;
+      return { json: async () => ({ code: 0, data: { record: { record_id: "rec_1" } } }) };
+    }
+    throw new Error(url);
+  };
+  const env = {
+    FEISHU_APP_ID: "cli_aaff6cb53db89bd3",
+    FEISHU_APP_SECRET: "test-secret",
+    FEISHU_APP_TOKEN: "bascnTEST",
+  };
+  const writer = createFeishuHttpWriter(env, fetchImpl);
+  const feishu = createFeishuIndex({
+    FEISHU_INDEX_MODE: "live",
+    FEISHU_INDEX_LIVE_CONFIRM: "YES",
+    FEISHU_ASSESSMENT_TABLE_ID: "tblTEST",
+    ...env,
+  }, writer);
+  const row = {
+    "报告 ID": "rpt_abcdefghijklmnopqrst",
+    "客户昵称": "小林",
+    "测评 ID": "star",
+    "测评名称": "职业六芒星",
+    "完成时间": "2026-10-20T12:00:00+08:00",
+    "核心结果摘要": "底层动力：自由",
+    "来源": "站内合集",
+    "关联客户 ID": "",
+    "报告状态": "有效",
+    "客户归档状态": "未归档",
+    "同步状态": "已同步",
+    "来源导师 ID": "",
+    "来源活动": "",
+    "记录版本": "1.0.0",
+    "报告字节数": 3072,
+    "创建时间": "2026-10-20T04:00:00.000Z",
+  };
+  assert.equal(await feishu.upsert(row), "ok");
+  row["报告状态"] = "已撤销";
+  assert.equal(await feishu.upsert(row), "ok");
+  assert.equal(records.length, 1);
+  assert.equal(records[0].fields["报告状态"], "已撤销");
+  assert.equal(typeof records[0].fields["完成时间"], "number");
+  assert.equal(calls.filter((call) => call.method === "POST" && call.url.endsWith("/records")).length, 1);
+  assert.equal(calls.filter((call) => call.method === "PUT").length, 1);
+  records.push({ id: "rec_dup", fields: { ...records[0].fields } });
+  assert.equal(await feishu.upsert(row), "ok");
+  assert.equal(calls.filter((call) => call.method === "POST" && call.url.endsWith("/records")).length, 1);
+  assert.equal(calls.filter((call) => call.method === "PUT").length, 2);
+  assert.equal(calls.filter((call) => call.method === "PUT").at(-1).url.endsWith("/records/rec_1"), true);
+  assert.equal(JSON.stringify(records).includes("link-secret"), false);
+  assert.equal(feishuLiveReady({ FEISHU_INDEX_MODE: "live" }), false);
+});
+
+test("多次镜像失败后标失败，但报告还在", async () => {
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock", failTimes: 1 });
+  const { handle, store, retryMirrors } = app({ feishu });
+  const made = result();
+  await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  });
+  await store.update(made.reportId, { feishuAttempts: 7, feishuSync: "待重试" });
+  feishu.failNext(1);
+  const [doc] = await retryMirrors();
+  assert.equal(doc.feishuSync, "失败");
+  assert.equal(feishu.rows.length, 0);
+  const read = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  });
+  assert.equal(read.status, 200);
+});
+
+test("管理员要有集成密钥和链接秘密，归档不改客户字段也不按昵称合并", async () => {
+  const { handle } = app();
+  const made = result();
+  await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  });
+  const hidden = await post({ handle }, "/v1/integrations/asva/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  });
+  assert.equal(hidden.status, 404);
+  const headers = { authorization: "Bearer test-import-key" };
+  const preview = await post({ handle }, "/v1/integrations/asva/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  }, { headers });
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.nickname, "小林");
+  const missingCustomer = await post({ handle }, "/v1/integrations/asva/archive", {
+    reportId: made.reportId, linkSecret: made.linkSecret, customerId: "",
+  }, { headers });
+  assert.equal(missingCustomer.status, 422);
+  const archived = await post({ handle }, "/v1/integrations/asva/archive", {
+    reportId: made.reportId, linkSecret: made.linkSecret, customerId: "C00001001",
+  }, { headers, ip: "203.0.113.20" });
+  assert.equal(archived.status, 200);
+  assert.deepEqual(archived.body.customerFieldsTouched, []);
+  assert.equal(archived.body.nicknameAutoMatched, false);
+  const duplicate = await post({ handle }, "/v1/integrations/asva/archive", {
+    reportId: made.reportId, linkSecret: made.linkSecret, customerId: "C00001001",
+  }, { headers, ip: "203.0.113.21" });
+  assert.equal(duplicate.body.duplicate, true);
+  const other = await post({ handle }, "/v1/integrations/asva/archive", {
+    reportId: made.reportId, linkSecret: made.linkSecret, customerId: "C00001002",
+  }, { headers, ip: "203.0.113.22" });
+  assert.equal(other.status, 409);
+  const draft = buildImportDraft({
+    report: preview.body,
+    customerId: "C00001001",
+    linkSecret: made.linkSecret,
+    existing: [],
+  });
+  assert.equal(draft.ok, true);
+  assert.equal(JSON.stringify(draft.sourceRecord).includes(made.linkSecret), false);
+  assert.deepEqual(draft.customerFieldsTouched, []);
+  const again = buildImportDraft({
+    report: preview.body,
+    customerId: "C00001001",
+    existing: [{ reportId: made.reportId, customerId: "C00001001", sourceId: draft.sourceRecord.source_id }],
+  });
+  assert.equal(again.error, "duplicate");
+});
+
+test("拒绝分数、其他测评、手机号字段、过大正文、错误来源和超限", async () => {
+  const { handle, store } = app();
+  const made = result();
+  made.payload.dimensions[0].score = 88;
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  })).status, 422);
+  const other = result();
+  other.payload.assessmentId = "scl90";
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: other.payload, linkSecret: other.linkSecret, ownerToken: other.ownerToken,
+  }, { ip: "203.0.113.30" })).status, 422);
+  const phone = result();
+  phone.payload.extensionData.phone = "13800000000";
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: phone.payload, linkSecret: phone.linkSecret, ownerToken: phone.ownerToken,
+  }, { ip: "203.0.113.31" })).status, 422);
+  const huge = await handle({
+    method: "POST",
+    path: "/v1/results",
+    headers: {},
+    rawBody: "x".repeat(400 * 1024 + 1),
+    ip: "203.0.113.32",
+    now: 1,
+  });
+  assert.equal(huge.status, 413);
+  const blocked = await handle({
+    method: "POST",
+    path: "/v1/results",
+    headers: { origin: "https://evil.example" },
+    body: {},
+    ip: "203.0.113.33",
+    now: 1,
+  });
+  assert.equal(blocked.status, 403);
+  for (let i = 0; i < 10; i += 1) {
+    assert.equal((await post({ handle }, "/v1/results", { result: {} }, { ip: "203.0.113.40", now: 5_000 })).status, 422);
+  }
+  assert.equal((await post({ handle }, "/v1/results", { result: {} }, { ip: "203.0.113.40", now: 5_001 })).status, 429);
+  assert.equal(store.size(), 0);
+});
+
+function confirmedEnv(extra = {}) {
+  return {
+    ASSESSMENT_COLLECTION: "assessment_reports_dev",
+    ASSESSMENT_STORE_DRIVER: "postgres",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+    ...extra,
+  };
+}
+
+function mockSql() {
+  const rows = new Map();
+  const statements = [];
+  return {
+    statements,
+    async query(text, params = []) {
+      statements.push(text);
+      if (text.startsWith("CREATE TABLE") || text.startsWith("CREATE UNIQUE INDEX")) return { rows: [] };
+      if (text.startsWith("INSERT")) {
+        const [reportId, submissionId, raw] = params;
+        if (rows.has(reportId) || [...rows.values()].some((item) => item.source_submission_id === submissionId)) {
+          const error = new Error("duplicate key value violates unique constraint");
+          error.code = "23505";
+          throw error;
+        }
+        rows.set(reportId, { report_id: reportId, source_submission_id: submissionId, doc: JSON.parse(raw) });
+        return { rows: [] };
+      }
+      if (text.startsWith("UPDATE")) {
+        const [raw, submissionId, reportId] = params;
+        const row = rows.get(reportId);
+        if (!row) return { rows: [] };
+        row.doc = JSON.parse(raw);
+        row.source_submission_id = submissionId;
+        return { rows: [] };
+      }
+      if (text.includes("WHERE report_id")) {
+        const row = rows.get(params[0]);
+        return { rows: row ? [{ doc: row.doc }] : [] };
+      }
+      if (text.includes("WHERE source_submission_id")) {
+        const row = [...rows.values()].find((item) => item.source_submission_id === params[0]);
+        return { rows: row ? [{ doc: row.doc }] : [] };
+      }
+      if (text.includes("ORDER BY report_id")) {
+        const [limit, offset] = params;
+        return { rows: [...rows.values()].slice(offset, offset + limit).map((item) => ({ doc: item.doc })) };
+      }
+      throw new Error(`unexpected sql ${text}`);
+    },
+  };
+}
+
+function mockRdb(options = {}) {
+  const rows = new Map();
+  function run(state) {
+    if (options.missing && state.action === "select") {
+      return { data: null, error: { code: "PGRST205", message: "Could not find the table 'public.assessment_reports_dev' in the schema cache" } };
+    }
+    if (state.action === "insert") {
+      const payload = state.payload;
+      if (options.alwaysDuplicate || rows.has(payload.report_id) || [...rows.values()].some((item) => item.source_submission_id === payload.source_submission_id)) {
+        return { data: null, error: { code: "23505", message: "duplicate key value violates unique constraint" } };
+      }
+      rows.set(payload.report_id, payload);
+      return { data: [payload], error: null };
+    }
+    if (state.action === "update") {
+      const row = rows.get(state.filters.report_id);
+      if (!row) return { data: [], error: null };
+      const next = { ...row, ...state.payload };
+      rows.set(state.filters.report_id, next);
+      return { data: [next], error: null };
+    }
+    let list = [...rows.values()];
+    for (const [key, value] of Object.entries(state.filters)) list = list.filter((row) => row[key] === value);
+    if (state.range) list = list.slice(state.range[0], state.range[1] + 1);
+    else list = list.slice(0, state.limit);
+    return { data: list, error: null };
+  }
+  return {
+    from() {
+      const state = { action: "select", filters: {}, payload: null, limit: 100, range: null };
+      const api = {
+        select() { return api; },
+        insert(row) { state.action = "insert"; state.payload = row; return api; },
+        update(row) { state.action = "update"; state.payload = row; return api; },
+        eq(key, value) { state.filters[key] = value; return api; },
+        order() { return api; },
+        limit(size) { state.limit = size; return api; },
+        range(from, to) { state.range = [from, to]; return api; },
+        then(resolve, reject) { return Promise.resolve(run(state)).then(resolve, reject); },
+      };
+      return api;
+    },
+  };
+}
+
+function sampleDoc() {
+  return {
+    reportId: "rpt_abcdefghijklmnopqrst",
+    sourceSubmissionId: "sub_abcdefghij",
+    bodyHash: "a",
+    byteSize: 12,
+    linkSecretHash: "b",
+    ownerSecretHash: "c",
+    shareStatus: "active",
+    revokedAt: null,
+    archiveStatus: "未归档",
+    customerId: "",
+    feishuSync: "待重试",
+    feishuAttempts: 0,
+    indexStatus: "待重试",
+    createdAt: "2026-10-20T00:00:00.000Z",
+    payload: { nickname: "小林", reportId: "rpt_abcdefghijklmnopqrst" },
+    collection: "assessment_reports_dev",
+  };
+}
+
+test("隔离表以外直接拒绝，未确认或没有云身份时不连接", async () => {
+  assert.throws(() => assertDevCollection("assessment_reports"), /拒绝写入非隔离表/);
+  const source = await readFile(new URL("./lib/store.mjs", import.meta.url), "utf8");
+  assert.equal(source.includes("database()"), false);
+  assert.equal(source.includes("createCollection"), false);
+  assert.equal(source.includes("文档型"), false);
+  assert.match(source, /app\.rdb\(/);
+  const sql = tableSql("assessment_reports_dev").join("\n");
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS "assessment_reports_dev"/);
+  assert.match(sql, /report_id text PRIMARY KEY/);
+  assert.match(sql, /doc jsonb NOT NULL/);
+  assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS "assessment_reports_dev_source_submission_id_uidx"/);
+  await assert.rejects(() => createCloudBaseStore({ ASSESSMENT_STORE_DRIVER: "postgres" }), /未确认隔离写入/);
+  await assert.rejects(() => createCloudBaseStore(confirmedEnv()), (error) => {
+    assert.match(error.message, /没有云函数身份/);
+    assert.equal(error.message.includes("文档型"), false);
+    return true;
+  });
+  await assert.rejects(() => createCloudBaseStore(confirmedEnv({
+    ASSESSMENT_COLLECTION: "assessment_reports",
+  })), /拒绝写入非隔离表/);
+  await assert.rejects(() => createCloudBaseStore(confirmedEnv({
+    TCB_ENV: "other-env",
+    TENCENTCLOUD_RUNENV: "SCF",
+  })), /非授权环境/);
+});
+
+test("PostgreSQL mock：插入幂等、更新，rdb 缺表时给出建表 SQL", async () => {
+  const db = mockSql();
+  const store = await createCloudBaseStore(confirmedEnv(), db);
+  assert.equal(store.driver, "postgres");
+  assert.equal(store.collection, "assessment_reports_dev");
+  assert.equal(db.statements.some((statement) => statement.startsWith("CREATE TABLE")), true);
+  assert.equal(db.statements.some((statement) => statement.startsWith("CREATE UNIQUE INDEX")), true);
+
+  const doc = sampleDoc();
+  await store.insert(doc);
+  await assert.rejects(() => store.insert({ ...doc }), (error) => {
+    assert.equal(error.code, "duplicate");
+    return true;
+  });
+  await assert.rejects(() => store.insert({
+    ...doc,
+    reportId: "rpt_zzzzzzzzzzzzzzzz",
+  }), (error) => {
+    assert.equal(error.code, "duplicate");
+    return true;
+  });
+
+  const updated = await store.update(doc.reportId, {
+    shareStatus: "revoked",
+    revokedAt: "2026-10-20T01:00:00.000Z",
+    feishuSync: "off",
+    indexStatus: "off",
+  });
+  assert.equal(updated.shareStatus, "revoked");
+  assert.equal(updated.feishuSync, "off");
+  assert.equal(updated.payload.nickname, "小林");
+  const byId = await store.getByReportId(doc.reportId);
+  const bySubmission = await store.getBySubmission(doc.sourceSubmissionId);
+  assert.equal(byId.shareStatus, "revoked");
+  assert.equal(byId.revokedAt, "2026-10-20T01:00:00.000Z");
+  assert.equal(bySubmission.feishuSync, "off");
+  assert.equal((await store.all()).length, 1);
+  assert.equal(await store.update("rpt_missingmissingmiss", { shareStatus: "revoked" }), null);
+
+  const raced = {
+    async query(text, params = []) {
+      if (text.startsWith("CREATE")) return { rows: [] };
+      if (text.startsWith("SELECT")) return { rows: [] };
+      if (text.startsWith("INSERT")) {
+        const error = new Error("duplicate key value violates unique constraint");
+        error.code = "23505";
+        throw error;
+      }
+      throw new Error(`unexpected sql ${text} ${params.length}`);
+    },
+  };
+  const raceStore = await createCloudBaseStore(confirmedEnv({ ASSESSMENT_STORE_DRIVER: "cloudbase" }), raced);
+  await assert.rejects(() => raceStore.insert(sampleDoc()), (error) => {
+    assert.equal(error.code, "duplicate");
+    return true;
+  });
+
+  await assert.rejects(() => createCloudBaseStore(confirmedEnv(), mockRdb({ missing: true })), (error) => {
+    assert.match(error.message, /还没有表 assessment_reports_dev/);
+    assert.match(error.message, /CREATE TABLE IF NOT EXISTS "assessment_reports_dev"/);
+    assert.equal(error.message.includes("文档型"), false);
+    return true;
+  });
+
+  const rdb = mockRdb();
+  const viaRdb = await createCloudBaseStore(confirmedEnv(), rdb);
+  const second = sampleDoc();
+  second.reportId = "rpt_rdbrdbrdbrdbrdbrdb";
+  second.sourceSubmissionId = "sub_rdbrdbrdb";
+  await viaRdb.insert(second);
+  await assert.rejects(() => viaRdb.insert({ ...second }), (error) => {
+    assert.equal(error.code, "duplicate");
+    return true;
+  });
+  const changed = await viaRdb.update(second.reportId, { shareStatus: "revoked", feishuSync: "off" });
+  assert.equal(changed.shareStatus, "revoked");
+  assert.equal((await viaRdb.getByReportId(second.reportId)).feishuSync, "off");
+  assert.equal((await viaRdb.getBySubmission(second.sourceSubmissionId)).shareStatus, "revoked");
+});
+
+test("部署入口在确认开关打开时才允许监听，且拒绝内存库和飞书 live", () => {
+  assert.equal(deployBlockReason({ ASSESSMENT_DEPLOY_CONFIRM: "" }), "hold");
+  assert.equal(deployBlockReason({
+    ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
+    ASSESSMENT_STORE_DRIVER: "memory",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+  }), "memory");
+  assert.equal(deployBlockReason({
+    ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
+    ASSESSMENT_STORE_DRIVER: "postgres",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+    FEISHU_INDEX_MODE: "live",
+  }), "feishu-live");
+  assert.equal(deployBlockReason({
+    ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
+    ASSESSMENT_STORE_DRIVER: "postgres",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+    FEISHU_INDEX_MODE: "live",
+    FEISHU_INDEX_LIVE_CONFIRM: "YES",
+    FEISHU_ASSESSMENT_TABLE_ID: "tblTEST",
+    FEISHU_APP_ID: "cli_aaff6cb53db89bd3",
+    FEISHU_APP_SECRET: "test-secret",
+    FEISHU_APP_TOKEN: "bascnTEST",
+  }), "");
+  assert.equal(deployBlockReason({
+    ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
+    ASSESSMENT_STORE_DRIVER: "postgres",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+    FEISHU_INDEX_MODE: "off",
+  }), "");
+  assert.equal(deployBlockReason({
+    ASSESSMENT_DEPLOY_CONFIRM: "dev-isolated",
+    ASSESSMENT_STORE_DRIVER: "cloudbase",
+    ASSESSMENT_CLOUDBASE_WRITE_CONFIRM: "dev-isolated",
+    FEISHU_INDEX_MODE: "off",
+  }), "");
+});
+
+test("健康检查返回真实驱动；部署确认打开时 deployed 为 true", async () => {
+  const off = createHandler({
+    store: createMemoryStore("assessment_reports_dev"),
+    feishu: createFeishuIndex({ FEISHU_INDEX_MODE: "off" }),
+    silent: true,
+  });
+  const hidden = await off.handle({ method: "GET", path: "/health", headers: {} });
+  assert.equal(hidden.body.store, "memory");
+  assert.equal(hidden.body.deployed, false);
+  assert.equal(hidden.body.feishu, "off");
+
+  const on = createHandler({
+    store: { ...createMemoryStore("assessment_reports_dev"), driver: "postgres" },
+    feishu: createFeishuIndex({ FEISHU_INDEX_MODE: "off" }),
+    deployed: true,
+    silent: true,
+  });
+  const shown = await on.handle({ method: "GET", path: "/assessmentReportDev/health", headers: {} });
+  assert.equal(shown.body.store, "postgres");
+  assert.equal(shown.body.deployed, true);
+  assert.equal(shown.body.service, "assessmentReportDev");
+});
+
+test("本地 HTTP 默认内存库，函数前缀下的健康检查同样可读", async () => {
+  const previous = {
+    driver: process.env.ASSESSMENT_STORE_DRIVER,
+    confirm: process.env.ASSESSMENT_DEPLOY_CONFIRM,
+    feishu: process.env.FEISHU_INDEX_MODE,
+    silent: process.env.SILENT,
+  };
+  process.env.ASSESSMENT_STORE_DRIVER = "memory";
+  delete process.env.ASSESSMENT_DEPLOY_CONFIRM;
+  process.env.FEISHU_INDEX_MODE = "off";
+  process.env.SILENT = "1";
+  const server = await startLocalServer({ host: "127.0.0.1", port: 0 });
+  try {
+    const port = server.address().port;
+    const body = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
+    assert.equal(body.store, "memory");
+    assert.equal(body.deployed, false);
+    assert.equal(body.feishu, "off");
+    assert.equal(body.collection, "assessment_reports_dev");
+    const prefixed = await (await fetch(`http://127.0.0.1:${port}/assessmentReportDev/health`)).json();
+    assert.equal(prefixed.store, "memory");
+    assert.equal(prefixed.ok, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    for (const [key, value] of Object.entries({
+      ASSESSMENT_STORE_DRIVER: previous.driver,
+      ASSESSMENT_DEPLOY_CONFIRM: previous.confirm,
+      FEISHU_INDEX_MODE: previous.feishu,
+      SILENT: previous.silent,
+    })) {
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("手机预览只带六芒星，阅读页指向 preview，来源加入白名单", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "star-preview-"));
+  await buildPreview(dir);
+  const config = await readFile(path.join(dir, "js/assessment-cloud-config.mjs"), "utf8");
+  assert.match(config, new RegExp(HTTP_ORIGIN.replaceAll(".", "\\.")));
+  assert.match(config, /\/assessment-report-dev\/preview\/r\//);
+  assert.equal(config.includes(PREVIEW_REPORT_BASE), true);
+  const home = await readFile(path.join(dir, "index.html"), "utf8");
+  assert.match(home, /打开职业六芒星/);
+  assert.equal(home.includes("asva-import"), false);
+  const star = await readFile(path.join(dir, "star/index.html"), "utf8");
+  assert.match(star, /noindex/);
+  for (const rel of ["star/js/app.js", "star/js/data.js", "js/cloud-kit.js", "r/index.html", "js/assessment-cloud-config.mjs"]) {
+    const fresh = await readFile(path.join(dir, rel), "utf8");
+    const committed = await readFile(new URL(`./preview-site/${rel}`, import.meta.url), "utf8");
+    assert.equal(committed, fresh, rel);
+  }
+  const production = await readFile(new URL("../../js/assessment-cloud-config.mjs", import.meta.url), "utf8");
+  assert.equal(production.includes("/preview/r/"), false);
+
+  assert.equal(normalizeRequestPath("/assessment-report-dev/preview/star/index.html"), "/preview/star/index.html");
+  assert.equal(resolveStatic("/preview/../.env", { deployed: true }), null);
+  assert.equal(resolveStatic("/star/index.html", { deployed: true }), null);
+  assert.equal(resolveStatic("/star/index.html", { deployed: false }).endsWith(`${path.sep}star${path.sep}index.html`), true);
+
+  const { handle } = app();
+  const allowed = await handle({
+    method: "POST",
+    path: "/v1/results",
+    headers: { origin: HTTP_ORIGIN },
+    body: {},
+    ip: "203.0.113.90",
+    now: 9_000,
+  });
+  assert.equal(allowed.status, 422);
+  assert.equal(allowed.headers["access-control-allow-origin"], HTTP_ORIGIN);
+
+  const server = await startLocalServer({ host: "127.0.0.1", port: 0, deployed: true });
+  try {
+    const port = server.address().port;
+    const page = await fetch(`http://127.0.0.1:${port}/assessment-report-dev/preview/`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /打开职业六芒星/);
+    const hidden = await fetch(`http://127.0.0.1:${port}/star/index.html`);
+    assert.equal(hidden.status, 404);
+    const cross = await fetch(`http://127.0.0.1:${port}/v1/results`, {
+      method: "POST",
+      headers: { origin: HTTP_ORIGIN, "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(cross.status, 422);
+    assert.equal(cross.headers.get("access-control-allow-origin"), HTTP_ORIGIN);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("其他测评页面没有接上云端块", async () => {
+  for (const file of ["index.html", "ecr/index.html", "pdq/index.html", "scl90/index.html", "beattie/index.html"]) {
+    const text = await readFile(new URL(`../../${file}`, import.meta.url), "utf8");
+    assert.equal(text.includes("cloud-kit"), false);
+    assert.equal(text.includes("star-cloud"), false);
+  }
+});
