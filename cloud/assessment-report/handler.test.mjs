@@ -7,7 +7,7 @@ import { WORDS } from "../../star/js/data.js";
 import { buildStarResult } from "../../star/js/cloud-payload.js";
 import { createHandler } from "./lib/handler.mjs";
 import { createCloudBaseStore, createMemoryStore, tableSql } from "./lib/store.mjs";
-import { createFeishuHttpWriter, createFeishuIndex, feishuLiveReady, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
+import { buildGithubShareUrl, createFeishuHttpWriter, createFeishuIndex, feishuLiveReady, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
 import { assertDevCollection, randomSecret } from "./lib/ids.mjs";
 import { buildImportDraft } from "./lib/import-draft.mjs";
 import { deployBlockReason } from "./index.mjs";
@@ -153,6 +153,25 @@ test("同一提交号内容变了不会覆盖，换词序是新报告，旧链�
   assert.deepEqual(oldRead.body.reportContent.viewModel.driveOrder, first.payload.reportContent.viewModel.driveOrder);
 });
 
+test("线上短编号也能存档，分享链接去掉 rpt_ 前缀", async () => {
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock" });
+  const { handle } = app({ feishu });
+  const made = result({}, {
+    reportId: `rpt_${"a".repeat(11)}`,
+    clientSubmissionId: `sub_${"c".repeat(16)}`,
+    linkSecret: "b".repeat(16),
+    ownerToken: "d".repeat(24),
+  });
+  const created = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  });
+  assert.equal(created.status, 200);
+  const url = feishu.rows[0]["分享链接"];
+  assert.equal(url, `https://xiangshu3721.github.io/mindtest-web/r/#${"a".repeat(11)}.${"b".repeat(16)}`);
+  assert.equal(url.includes("rpt_"), false);
+  assert.equal(JSON.stringify(created.body).includes("tcloudbase.com"), false);
+});
+
 test("飞书镜像按报告 ID 幂等，失败后重试，撤销不改归档状态", async () => {
   const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock", failTimes: 1 });
   const { handle, store, retryMirrors } = app({ feishu });
@@ -176,7 +195,11 @@ test("飞书镜像按报告 ID 幂等，失败后重试，撤销不改归档状�
   assert.equal(feishu.rows[0]["客户归档状态"], "未归档");
   assert.equal(feishu.rows[0]["同步状态"], "已同步");
   assert.equal(feishu.rows[0]["核心结果摘要"].length <= 120, true);
-  assert.equal(JSON.stringify(feishu.rows[0]).includes(made.linkSecret), false);
+  assert.equal(feishu.rows[0]["分享链接"], buildGithubShareUrl(made.reportId, made.linkSecret));
+  assert.equal(feishu.rows[0]["分享链接"].includes("rpt_"), false);
+  assert.equal(feishu.rows[0]["分享链接"].startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
+  assert.equal(feishu.rows[0]["分享链接"].includes("tcloudbase.com"), false);
+  assert.equal(JSON.stringify(feishu.rows[0]).includes(made.ownerToken), false);
   assert.equal(JSON.stringify(feishu.rows[0]).includes("cull1"), false);
   assert.equal(TABLE_NAME, "ASVA 测评记录");
 
@@ -200,6 +223,7 @@ test("飞书镜像按报告 ID 幂等，失败后重试，撤销不改归档状�
   assert.equal(feishu.rows.length, 1);
   assert.equal(feishu.rows[0]["报告状态"], "已撤销");
   assert.equal(feishu.rows[0]["客户归档状态"], "未归档");
+  assert.equal(feishu.rows[0]["分享链接"], buildGithubShareUrl(made.reportId, made.linkSecret));
 });
 
 test("飞书 live 未确认时不调用 writer，报告仍在", async () => {

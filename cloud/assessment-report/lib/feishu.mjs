@@ -3,6 +3,7 @@
  * PostgreSQL 里的报告是准的。这里只是可重试的镜像，失败与否不能靠飞书里有没有行来判断。
  * 不建表、不调用妙搭 webhook。
  * live 要同时有 YES 确认、表 ID、应用凭证和 Base token，才会按「报告 ID」查找后更新或新建。
+ * 「分享链接」只写 GitHub Pages。编号去掉 rpt_ 前缀，秘密留在 hash 里。不用腾讯云预览页。
  */
 
 export const FEISHU_APP_ID = "cli_aaff6cb53db89bd3";
@@ -10,8 +11,10 @@ export const BASE_NAME = "ASVA 测评数据";
 const FEISHU_OPEN = "https://open.feishu.cn/open-apis";
 
 export const TABLE_NAME = "ASVA 测评记录";
+export const GITHUB_SHARE_BASE = "https://xiangshu3721.github.io/mindtest-web/r/";
 export const MIRROR_FIELDS = [
   "报告 ID",
+  "分享链接",
   "客户昵称",
   "测评 ID",
   "测评名称",
@@ -34,13 +37,28 @@ export function clipChars(value, max) {
   return chars.length > max ? chars.slice(0, max).join("") : chars.join("");
 }
 
+export function buildGithubShareUrl(reportId, linkSecret) {
+  const id = String(reportId || "");
+  const secret = String(linkSecret || "");
+  if (!id.startsWith("rpt_") || !secret) return "";
+  return `${GITHUB_SHARE_BASE}#${id.slice("rpt_".length)}.${secret}`;
+}
+
+function mirrorShareUrl(doc, reportId) {
+  const stored = typeof doc.shareUrl === "string" ? doc.shareUrl : "";
+  if (stored.startsWith(GITHUB_SHARE_BASE) && !stored.includes("tcloudbase.com")) return stored;
+  return buildGithubShareUrl(reportId, doc.linkSecret);
+}
+
 export function indexRow(doc) {
   const payload = doc.payload;
   const attribution = (payload.extensionData && payload.extensionData.attribution) || {};
   const headline = payload.result && payload.result.headline || "";
   const summary = payload.result && payload.result.summary || "";
+  const shareUrl = mirrorShareUrl(doc, payload.reportId);
   const row = {
     "报告 ID": payload.reportId,
+    ...(shareUrl ? { "分享链接": shareUrl } : {}),
     "客户昵称": payload.nickname,
     "测评 ID": payload.assessmentId,
     "测评名称": payload.assessmentName,

@@ -1,6 +1,8 @@
 # assessmentReportDev 隔离部署
 
-只部署这个函数。不要部署、不要更新 `asva-api`。不要把飞书改成 `live`，不要创建飞书表，不要购买资源包，不要改套餐。
+只部署这个函数。不要部署、不要更新 `asva-api`。不要创建飞书表，不要购买资源包，不要改套餐。
+
+`cloudbaserc.json` 里的 `FEISHU_INDEX_MODE` 保持 `off`，里面也没有应用密钥。`tcb fn deploy` 会用这份配置覆盖云上环境变量，可能把已经打开的 live 和密钥一起冲掉。更新代码用 `tcb fn code update`。打开飞书镜像只改云函数环境变量：`FEISHU_INDEX_MODE=live` 和 `FEISHU_INDEX_LIVE_CONFIRM=YES`，用合并而不是覆盖。
 
 环境：`root-journey-prod-d4d7pzd0a8f805`（个人版 `baas_personal`）。
 
@@ -41,7 +43,7 @@ tcb fn deploy assessmentReportDev --httpFn --path /assessment-report-dev --dir .
   --runtime Nodejs20.19 --timeout 60 --memory 256 --install-dependency false
 ```
 
-部署时不要改 `FEISHU_INDEX_MODE`，保持 `off`。不要部署或更新 `asva-api`。不要执行 `tcb hosting deploy`，不要开通新的托管，不要购买资源包。
+不要部署或更新 `asva-api`。不要执行 `tcb hosting deploy`，不要开通新的托管，不要购买资源包。代码更新不要走会覆盖环境变量的 `tcb fn deploy`。
 
 部署后用手机打开上面的预览地址，应看到「打开职业六芒星」。健康检查仍是 `feishu: off`。点选步骤在 `docs/assessment-cloud-v1/E2E_BROWSER_WECHAT.md`。
 
@@ -64,7 +66,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS assessment_reports_dev_source_submission_id_ui
   ON assessment_reports_dev (source_submission_id);
 ```
 
-`report_id` 对应 `reportId`。`source_submission_id` 对应 `clientSubmissionId`，唯一。`doc` 是整份服务端文档（jsonb），字段与内存文档一致：`reportId`、`sourceSubmissionId`、`bodyHash`、`byteSize`、`linkSecretHash`、`ownerSecretHash`、`shareStatus`、`revokedAt`、`archiveStatus`、`customerId`、`feishuSync`、`feishuAttempts`、`indexStatus`、`createdAt`、`payload`、`collection`。
+`report_id` 对应 `reportId`。`source_submission_id` 对应 `clientSubmissionId`，唯一。`doc` 是整份服务端文档（jsonb），字段与内存文档一致：`reportId`、`sourceSubmissionId`、`bodyHash`、`byteSize`、`linkSecretHash`、`ownerSecretHash`、`shareUrl`、`shareStatus`、`revokedAt`、`archiveStatus`、`customerId`、`feishuSync`、`feishuAttempts`、`indexStatus`、`createdAt`、`payload`、`collection`。`shareUrl` 是 GitHub Pages 分享链接，只写给飞书，阅读接口不返回。
 
 `rdb()` 不能执行建表。表还不存在时，函数启动失败，日志里会带上同一段 SQL。设了 `ASSESSMENT_PG_URL` 时，函数会自己执行这两句。
 
@@ -123,7 +125,7 @@ tcb fn deploy assessmentReportDev --httpFn --path /assessment-report-dev --dir .
 
 ## 用 curl 做合成闭环
 
-先看健康检查。`store` 必须是 `postgres`，`deployed` 为 true，`feishu` 为 `off`，`collection` 为 `assessment_reports_dev`。
+先看健康检查。`store` 必须是 `postgres`，`deployed` 为 true，`collection` 为 `assessment_reports_dev`。镜像打开后 `feishu` 为 `live`。
 
 ```bash
 BASE=https://root-journey-prod-d4d7pzd0a8f805-1304965105.ap-shanghai.app.tcloudbase.com/assessment-report-dev

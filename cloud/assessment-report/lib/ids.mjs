@@ -1,8 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const DEV_COLLECTION = "assessment_reports_dev";
-export const REPORT_ID_RE = /^rpt_[A-Za-z0-9_-]{16,64}$/;
-export const SECRET_RE = /^[A-Za-z0-9_-]{22,128}$/;
+export const REPORT_ID_RE = /^rpt_[A-Za-z0-9_-]{11,64}$/;
+export const SECRET_RE = /^[A-Za-z0-9_-]{16,128}$/;
 export const SUBMISSION_RE = /^sub_[A-Za-z0-9_-]{8,64}$/;
 
 export function assertDevCollection(name) {
