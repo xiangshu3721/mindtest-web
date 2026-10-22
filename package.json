@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test ecr/js/score.test.mjs js/cloud-client.test.mjs js/cloud-kit.test.mjs star/js/cloud-payload.test.mjs"
+    "test": "node --test ecr/js/score.test.mjs js/cloud-client.test.mjs js/cloud-kit.test.mjs js/report-render.test.mjs star/js/cloud-payload.test.mjs"
   }
 }

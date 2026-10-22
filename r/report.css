@@ -85,6 +85,46 @@ ol, ul { margin: 8px 0 0; padding-left: 1.2em; }
   cursor: pointer;
 }
 
+.sheet { overflow-wrap: anywhere; }
+
+.sefs-name { margin-top: 18px; font-size: clamp(28px, 8vw, 36px); line-height: 1.25; }
+.sefs-kicker, .sefs-total-label, .sefs-order, .sefs-notice { color: var(--muted); }
+.sefs-kicker { margin: 8px 0 0; font-size: 15px; }
+.sefs-total { margin-top: 18px; }
+.sefs-total-num {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: clamp(56px, 16vw, 72px);
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+}
+.sefs-total .sefs-total-num { margin: 0; }
+.sefs-total-num span { color: var(--muted); font-size: 0.38em; }
+.sefs-total-label { margin: 4px 0 0; font-size: 14px; }
+.sefs-total p { margin: 8px 0 0; }
+.sefs-section { margin-top: 26px; font-size: 26px; }
+.sefs-radar { width: min(100%, 420px); height: auto; display: block; margin: 0 auto; }
+.sefs-grid { fill: none; stroke: #e6ddd4; stroke-width: 1; }
+.sefs-shape { fill: #4b8370; fill-opacity: 0.28; stroke: #4b8370; stroke-width: 2; }
+.sefs-radar text { fill: var(--muted); font-size: 13px; font-family: var(--sans); }
+.sefs-radar circle { stroke: var(--sheet); stroke-width: 2; }
+.sefs-dims { display: grid; gap: 0; }
+.sefs-dim { padding: 14px 0; border-top: 1px solid #e6ddd4; }
+.sefs-dim h3 { margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 500; }
+.sefs-dim-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.sefs-score { flex: none; margin: 0; font-size: 20px; font-variant-numeric: tabular-nums; }
+.sefs-score small { color: var(--muted); font-size: 14px; }
+.sefs-track { height: 8px; margin-top: 8px; overflow: hidden; border-radius: 999px; background: #e7dfd6; }
+.sefs-fill { height: 100%; border-radius: inherit; }
+.sefs-dim-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.sefs-dim-meta span:last-child { white-space: nowrap; }
+.sefs-insight { margin-top: 8px; }
+.sefs-insight h3 { margin: 8px 0 0; font-family: var(--serif); font-size: 22px; font-weight: 500; line-height: 1.35; }
+.sefs-tag { margin: 18px 0 0; color: #4b8370; font-size: 13px; letter-spacing: 0.04em; }
+.sefs-insight p { margin: 10px 0 0; }
+.sefs-order { font-size: 13px; }
+.sefs-notice { margin-top: 22px; font-size: 14px; }
+
 @media (max-width: 640px) {
   .sheet { padding: 24px 16px; }
   .roster { grid-template-columns: 1fr; }
