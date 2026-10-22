@@ -1,4 +1,14 @@
 import { KEEP, REVIVE, WORDS } from "../words.mjs";
+import {
+  PDQ4_CONSENT_VERSION,
+  PDQ4_READER_GAP,
+  PDQ4_SCREEN_TEXT,
+  PDQ4_VERSION,
+  QUESTION_COUNT,
+  SCALES as PDQ4_SCALES,
+  pdq4Flags,
+  scorePdq4,
+} from "../vendor/pdq4-score.mjs";
 import { REPORT_ID_RE, SECRET_RE, SUBMISSION_RE } from "./ids.mjs";
 
 export const STAR_VERSION = "star-words-31-v1";
@@ -532,10 +542,176 @@ export function validateScl90Result(result) {
   return issues;
 }
 
+function sameValue(left, right) {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((item, index) => sameValue(item, right[index]));
+  }
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key) => Object.prototype.hasOwnProperty.call(right, key) && sameValue(left[key], right[key]));
+}
+
+function pdq4AnswersOk(list) {
+  return Array.isArray(list)
+    && list.length === QUESTION_COUNT
+    && list.every((value) => value === 0 || value === 1);
+}
+
+function pdq4ScaleView(scale) {
+  return {
+    id: scale.id,
+    name: scale.name,
+    alias: scale.alias || "",
+    cluster: scale.cluster,
+    score: scale.score,
+    max: scale.max,
+    cutoff: scale.cutoff,
+    positive: scale.positive,
+  };
+}
+
+function pdq4Dimension(scale) {
+  return {
+    id: scale.id,
+    name: scale.name,
+    kind: "score",
+    score: scale.score,
+    max: scale.max,
+    cutoff: scale.cutoff,
+    positive: scale.positive,
+    cluster: scale.cluster,
+    level: scale.positive ? "positive" : "negative",
+    levelLabel: scale.positive ? "达到划界" : "未达到",
+    narrative: scale.about,
+    labels: [],
+  };
+}
+
+export function validatePdq4Result(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  scanKeys(result, issues, "result");
+  for (const key of Object.keys(result)) {
+    if (!TOP_KEYS.has(key)) issues.push(`不能保存额外字段 ${key}`);
+  }
+  if (!REPORT_ID_RE.test(String(result.reportId || ""))) issues.push("reportId 格式不对");
+  if (result.assessmentId !== "pdq4") issues.push("测评不在可保存范围内");
+  const name = String(result.assessmentName || "");
+  if (!name.includes("PDQ-4") || !name.includes("人格障碍筛查")) issues.push("测评名称不对");
+  if (result.assessmentVersion !== PDQ4_VERSION) issues.push("规则版本不对");
+  if (result.schemaVersion !== SCHEMA_VERSION) issues.push("协议版本不对");
+  const nick = chars(result.nickname);
+  if (nick.length < 1 || nick.length > 12) issues.push("昵称需要 1–12 个字");
+  if (!Number.isFinite(Date.parse(result.completedAt))) issues.push("完成时间不对");
+
+  const view = result.reportContent && result.reportContent.viewModel;
+  const answers = view && view.answers;
+  const answersOk = pdq4AnswersOk(answers);
+  if (!answersOk) issues.push("作答需要 126 道 0 或 1 的题");
+  const scored = answersOk ? scorePdq4(answers) : null;
+
+  const dimensions = result.dimensions;
+  if (!Array.isArray(dimensions) || dimensions.length !== 12) issues.push("PDQ-4 需要十二条分量表");
+  else if (scored) {
+    dimensions.forEach((side, index) => {
+      const scale = scored.scales[index];
+      if (!sameValue(side, pdq4Dimension(scale))) issues.push(`${scale.id} 与作答不一致`);
+    });
+  } else {
+    dimensions.forEach((side, index) => {
+      const scale = PDQ4_SCALES[index];
+      if (!side || side.id !== scale.id) issues.push(`${scale.id} 标识不对`);
+    });
+  }
+
+  const outcome = result.result;
+  if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) issues.push("缺少结论");
+  else if (scored) {
+    if (outcome.headline !== scored.verdict.title) issues.push("结论与筛查结果不一致");
+    if (outcome.summary !== scored.verdict.text) issues.push("摘要与筛查结果不一致");
+    if (outcome.code !== scored.verdict.id) issues.push("筛查码与作答不一致");
+    if (outcome.label !== scored.verdict.title) issues.push("结论标签不对");
+    if (!sameValue(outcome.flags, pdq4Flags(scored))) issues.push("分数标记与作答不一致");
+  }
+
+  const blocks = []
+    .concat(result.interpretation || [], result.recommendations || [])
+    .map((item) => item && item.text);
+  if (!Array.isArray(result.interpretation) || !Array.isArray(result.recommendations)) {
+    issues.push("解释和建议必须是列表");
+  } else if (!blocks.includes(PDQ4_SCREEN_TEXT)) {
+    issues.push("筛查说明不完整");
+  }
+  if (!result.reportContent || result.reportContent.format !== "view-model+sections") {
+    issues.push("报告快照格式不对");
+  }
+  if (!view) issues.push("缺少视图");
+  else if (scored) {
+    if (!sameValue(view.scales, scored.scales.map(pdq4ScaleView))) issues.push("视图量表与作答不一致");
+    if (view.positiveCount !== scored.positiveCount) issues.push("阳性量表数与作答不一致");
+    if (view.total !== scored.total) issues.push("总分与作答不一致");
+    if (!sameValue(view.tooGood, scored.tooGood)) issues.push("掩饰分与作答不一致");
+    if (!sameValue(view.suspect, scored.suspect)) issues.push("怀疑分与作答不一致");
+    if (!sameValue(view.impulse, scored.impulse)) issues.push("冲动合成与作答不一致");
+    if (!sameValue(view.conduct, scored.conduct)) issues.push("品行合成与作答不一致");
+    if (!sameValue(view.verdict, scored.verdict)) issues.push("视图结论与作答不一致");
+  }
+  const raw = JSON.stringify(result.reportContent || {});
+  if (/data:(image|application\/pdf)|<!doctype|<html/i.test(raw)) issues.push("不能保存图片、PDF 或 HTML");
+
+  const extension = result.extensionData;
+  const consent = extension && extension.consent;
+  if (!consent || consent.agreed !== true) issues.push("未同意不能保存");
+  if (consent && consent.version !== PDQ4_CONSENT_VERSION) issues.push("同意文案版本不对");
+  const scopes = consent && consent.scopes;
+  if (!Array.isArray(scopes) || !scopes.includes("store") || !scopes.includes("share_link")) {
+    issues.push("同意范围不足");
+  }
+  if (extension && extension.profile) issues.push("PDQ-4 不保存资料页");
+  const attribution = extension && extension.attribution;
+  if (attribution && typeof attribution === "object") {
+    for (const key of ["mentorId", "activity"]) {
+      if (attribution[key] == null || attribution[key] === "") continue;
+      if (typeof attribution[key] !== "string" || Array.from(attribution[key]).length > 40) {
+        issues.push(`${key} 太长`);
+      }
+    }
+  }
+  const rushed = view && view.rushed;
+  const quality = extension && extension.quality;
+  if (typeof rushed !== "boolean" || !quality || quality.rushed !== rushed) {
+    issues.push("作答速度标记不一致");
+  }
+  if (scored) {
+    if (!sameValue(extension && extension.score, scored)) issues.push("扩展分数与作答不一致");
+    if (!sameValue(extension && extension.answers, answers)) issues.push("扩展作答与视图不一致");
+  }
+  const compat = extension && extension.compat;
+  if (!compat || compat.level !== "partial") issues.push("PDQ-4 这一期按部分兼容保存");
+  if (!compat || !Array.isArray(compat.gaps) || !compat.gaps.includes(PDQ4_READER_GAP)) {
+    issues.push("阅读页缺口说明不完整");
+  }
+
+  const source = result.source;
+  if (!source || source.origin !== "external-repo" || source.repo !== "mindtest" || source.path !== "pdq/index.html") {
+    issues.push("来源不对");
+  }
+  if (!source || !SUBMISSION_RE.test(String(source.clientSubmissionId || ""))) issues.push("提交号格式不对");
+  if (source && source.resultKitId !== "pdq4") issues.push("resultKit 标识不对");
+  return issues;
+}
+
 export function validateAssessmentResult(result) {
   if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
   if (result.assessmentId === "sefs") return validateSefsResult(result);
   if (result.assessmentId === "star") return validateStarResult(result);
   if (result.assessmentId === "scl90") return validateScl90Result(result);
+  if (result.assessmentId === "pdq4") return validatePdq4Result(result);
   return ["测评不在可保存范围内"];
 }

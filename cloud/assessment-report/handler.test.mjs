@@ -7,6 +7,9 @@ import { WORDS } from "../../star/js/data.js";
 import { buildStarResult } from "../../star/js/cloud-payload.js";
 import { buildSefsResult } from "./vendor/sefs-payload.mjs";
 import { buildScl90Result } from "./vendor/scl90-payload.mjs";
+import { buildPdq4Result } from "./vendor/pdq4-payload.mjs";
+import { scorePdq4 as cloudScorePdq4 } from "./vendor/pdq4-score.mjs";
+import { scorePdq4 as pageScorePdq4 } from "../../pdq/js/score.js";
 import { createHandler } from "./lib/handler.mjs";
 import { createCloudBaseStore, createMemoryStore, tableSql } from "./lib/store.mjs";
 import { buildGithubShareUrl, createFeishuHttpWriter, createFeishuIndex, feishuLiveReady, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
@@ -451,7 +454,7 @@ test("拒绝分数、其他测评、手机号字段、过大正文、错误来�
     result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
   })).status, 422);
   const other = result();
-  other.payload.assessmentId = "pdq4";
+  other.payload.assessmentId = "ecr";
   const rejected = await post({ handle }, "/v1/results", {
     result: other.payload, linkSecret: other.linkSecret, ownerToken: other.ownerToken,
   }, { ip: "203.0.113.30" });
@@ -998,6 +1001,139 @@ test("SCL-90 按因子重算后可保存，改分数或未放行测评仍是 422
     result: sefs, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
   }, { ip: "203.0.113.85" })).status, 200);
   assert.equal(store.size(), 3);
+});
+
+const PDQ4_SCALE_IDS = ["par", "szd", "szt", "ant", "bor", "his", "nar", "avo", "dep", "ocp", "pag", "dps"];
+
+function pdq4Body(answers, extra = {}, id = ids()) {
+  const payload = buildPdq4Result({
+    nickname: "小林",
+    answers,
+    completedAt: "2026-10-22T21:00:00+08:00",
+    ...extra,
+    ...id,
+  });
+  return { payload, ...id };
+}
+
+test("PDQ-4 按十二量表重算后可保存，改分数或未放行测评仍是 422，已放行测评仍可保存", async () => {
+  const blank = Array(126).fill(0);
+  const allYes = Array(126).fill(1);
+  const mixed = blank.slice();
+  for (let i = 0; i < mixed.length; i += 1) if (i % 3 === 0) mixed[i] = 1;
+  for (const answers of [blank, allYes, mixed]) {
+    assert.deepEqual(cloudScorePdq4(answers), pageScorePdq4(answers));
+  }
+
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock" });
+  const { handle, store, logs } = app({ feishu });
+  const answers = blank.slice();
+  for (const n of [11, 24, 37, 50]) answers[n - 1] = 1;
+  for (const n of [106, 107]) answers[n - 1] = 1;
+  answers[59] = 1;
+  const made = pdq4Body(answers, { rushed: true });
+  assert.equal(made.payload.assessmentId, "pdq4");
+  assert.equal(made.payload.assessmentName.includes("PDQ-4"), true);
+  assert.equal(made.payload.assessmentName.includes("人格障碍筛查"), true);
+  assert.deepEqual(made.payload.dimensions.map((item) => item.id), PDQ4_SCALE_IDS);
+  assert.equal(made.payload.dimensions.find((item) => item.id === "par").score, 4);
+  assert.equal(made.payload.dimensions.find((item) => item.id === "par").positive, true);
+  assert.equal(made.payload.dimensions.find((item) => item.id === "bor").score, 1);
+  assert.equal(made.payload.reportContent.viewModel.impulse.point, 1);
+  assert.equal(made.payload.reportContent.viewModel.conduct.point, 0);
+  assert.equal(made.payload.reportContent.viewModel.tooGood.flagged, true);
+  assert.equal(made.payload.reportContent.viewModel.suspect.flagged, false);
+  assert.equal(made.payload.result.code, "too-good");
+  assert.deepEqual(made.payload.extensionData.score, pageScorePdq4(answers));
+  const created = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  }, { headers: { origin: "https://xiangshu3721.github.io" }, ip: "203.0.113.90" });
+  assert.equal(created.status, 200);
+  assert.equal(feishu.rows[0]["测评 ID"], "pdq4");
+  assert.equal(feishu.rows[0]["测评名称"].includes("PDQ-4"), true);
+  assert.equal(feishu.rows[0]["测评名称"].includes("人格障碍筛查"), true);
+  assert.equal(feishu.rows[0]["分享链接"], buildGithubShareUrl(made.reportId, made.linkSecret));
+  assert.equal(feishu.rows[0]["分享链接"].startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
+  assert.equal(JSON.stringify(feishu.rows[0]).includes(JSON.stringify(answers)), false);
+  assert.equal(JSON.stringify(logs).includes(JSON.stringify(answers)), false);
+  const read = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  }, { ip: "203.0.113.91" });
+  assert.equal(read.status, 200);
+  assert.equal(read.body.assessmentId, "pdq4");
+  assert.equal(read.body.dimensions.find((item) => item.id === "szd").score, 1);
+  assert.equal(read.body.dimensions.find((item) => item.id === "szt").score, 1);
+  const revoked = await post({ handle }, "/v1/results/revoke", {
+    reportId: made.reportId, ownerToken: made.ownerToken,
+  }, { ip: "203.0.113.92" });
+  assert.equal(revoked.status, 200);
+  assert.equal(feishu.rows[0]["报告状态"], "已撤销");
+  const after = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  }, { ip: "203.0.113.93" });
+  assert.equal(after.status, 410);
+
+  const none = pdq4Body(blank);
+  assert.equal(none.payload.result.code, "too-good-clear");
+  assert.equal(none.payload.reportContent.viewModel.positiveCount, 0);
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: none.payload, linkSecret: none.linkSecret, ownerToken: none.ownerToken,
+  }, { ip: "203.0.113.94" })).status, 200);
+  const every = pdq4Body(allYes);
+  assert.equal(every.payload.reportContent.viewModel.positiveCount, 12);
+  assert.equal(every.payload.reportContent.viewModel.impulse.point, 1);
+  assert.equal(every.payload.reportContent.viewModel.conduct.point, 1);
+  assert.equal(every.payload.reportContent.viewModel.suspect.flagged, true);
+  assert.equal(every.payload.result.code, "suspect");
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: every.payload, linkSecret: every.linkSecret, ownerToken: every.ownerToken,
+  }, { ip: "203.0.113.95" })).status, 200);
+
+  const broken = pdq4Body(answers);
+  broken.payload.dimensions[0].score = 0;
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: broken.payload, linkSecret: broken.linkSecret, ownerToken: broken.ownerToken,
+  }, { ip: "203.0.113.96" })).status, 422);
+  const named = pdq4Body(answers);
+  named.payload.assessmentName = "PDQ-4";
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: named.payload, linkSecret: named.linkSecret, ownerToken: named.ownerToken,
+  }, { ip: "203.0.113.97" })).status, 422);
+  const short = pdq4Body(answers.slice(0, 125));
+  assert.equal(short.payload, null);
+  const blocked = result();
+  blocked.payload.assessmentId = "ecr";
+  const rejected = await post({ handle }, "/v1/results", {
+    result: blocked.payload, linkSecret: blocked.linkSecret, ownerToken: blocked.ownerToken,
+  }, { ip: "203.0.113.98" });
+  assert.equal(rejected.status, 422);
+  assert.equal(rejected.body.issues.includes("测评不在可保存范围内"), true);
+
+  const star = result();
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: star.payload, linkSecret: star.linkSecret, ownerToken: star.ownerToken,
+  }, { ip: "203.0.113.99" })).status, 200);
+  const sefsAnswers = Array(24).fill(0);
+  for (let i = 6; i < 12; i += 1) sefsAnswers[i] = 3;
+  const sefs = buildSefsResult({
+    nickname: "小林",
+    answers: sefsAnswers,
+    completedAt: "2026-10-22T12:00:00+08:00",
+    ...ids(),
+  });
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: sefs, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.100" })).status, 200);
+  const scl = buildScl90Result({
+    nickname: "小林",
+    answers: Array(90).fill(1),
+    completedAt: "2026-10-22T20:00:00+08:00",
+    ...ids(),
+  });
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: scl, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.101" })).status, 200);
+  assert.equal(store.size(), 6);
 });
 
 test("其他测评页面没有接上云端块", async () => {
