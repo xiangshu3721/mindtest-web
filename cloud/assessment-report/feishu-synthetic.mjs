@@ -11,6 +11,7 @@ if (process.argv.includes("--live")) {
 
 const doc = {
   customerId: "",
+  linkSecret: "oldlonglinksecretvalue",
   shareStatus: "active",
   archiveStatus: "未归档",
   feishuSync: "已同步",
@@ -41,6 +42,7 @@ if (feishu.rows.length !== 1) {
 }
 if (feishu.rows[0]["报告 ID"] !== doc.payload.reportId) process.exit(1);
 if (JSON.stringify(feishu.rows[0]).includes("linkSecret")) process.exit(1);
+if (feishu.rows[0]["分享链接"] !== "https://xiangshu3721.github.io/mindtest-web/r/#syntheticexample01.oldlonglinksecretvalue") process.exit(1);
 
 console.log(JSON.stringify({
   dryRun: true,

@@ -48,7 +48,8 @@ HTTP 函数名：`assessmentReportDev`，路径与现有 `/asva-api` 分开。
 |---|---|
 | `reportId` | 主键。客户端生成，服务端保证同一提交号不插第二份 |
 | `sourceSubmissionId` | `clientSubmissionId`，幂等键 |
-| `bodyHash`、`linkSecretHash`、`ownerSecretHash` | 只存哈希。分享秘密和作废口令的原文不入库 |
+| `bodyHash`、`linkSecretHash`、`ownerSecretHash` | 只存哈希。作废口令的原文不入库 |
+| `shareUrl` | GitHub Pages 分享链接，hash 里带分享秘密。只给飞书「分享链接」列，阅读接口不返回 |
 | `byteSize` | 协议 JSON 的 UTF-8 字节数 |
 | `shareStatus` | `active` / `revoked`。对应飞书「报告状态」 |
 | `archiveStatus` | `未归档` / `已归档`。撤销不会改它 |
@@ -133,7 +134,7 @@ tcb fn deploy assessmentReportDev --httpFn --path /assessment-report-dev --dir .
 
 位置：独立 Base「ASVA 测评数据」。现在还没有用户提供的 Base 链接，也没有 `table_id`。`table_id` 用环境变量 `FEISHU_ASSESSMENT_TABLE_ID`，当前为空。写入开关 `FEISHU_INDEX_MODE` 默认 `off`。
 
-仓库里有可注入的飞书 HTTP writer：按「报告 ID」查询，已有记录就更新第一条，没有记录才新建。`live` 要同时有 `FEISHU_INDEX_LIVE_CONFIRM=YES`、表 ID、应用 ID、应用密钥和 `FEISHU_APP_TOKEN`。缺任何一项时进程拒绝以 live 启动，也不会发请求。凭证不进 Git。这一轮 `cloudbaserc.json` 仍是 `off`，不要在线上改成 `live`。
+仓库里有可注入的飞书 HTTP writer：按「报告 ID」查询，已有记录就更新第一条，没有记录才新建。`live` 要同时有 `FEISHU_INDEX_LIVE_CONFIRM=YES`、表 ID、应用 ID、应用密钥和 `FEISHU_APP_TOKEN`。缺任何一项时进程拒绝以 live 启动，也不会发请求。凭证不进 Git。`cloudbaserc.json` 保持 `off`，避免覆盖式部署抹掉云上已经配置的应用密钥。线上打开镜像时，只在云函数环境变量里设置 `FEISHU_INDEX_MODE=live` 和 `FEISHU_INDEX_LIVE_CONFIRM=YES`。
 
 不使用生活小调查的妙搭 webhook。ASVA 现用飞书应用是 `cli_aaff6cb53db89bd3`（与解忧小屋同一应用）。小调查应用 `cli_aa3e5840a3f89d2b` 不用于测评。
 
@@ -157,8 +158,9 @@ tcb fn deploy assessmentReportDev --httpFn --path /assessment-report-dev --dir .
 | 14 | 记录版本 | 文本 | 否 | `schemaVersion`，现为 `1.0.0` |
 | 15 | 报告字节数 | 数字 | 否 | `byteSize` |
 | 16 | 创建时间 | 日期时间 | 否 | 服务端写入时间 |
+| 17 | 分享链接 | 文本 | 可空 | `https://xiangshu3721.github.io/mindtest-web/r/#` + 去掉 `rpt_` 的编号 + `.` + 分享秘密。新短链和旧长链同一形态。没有链接时不写这一列，避免撤销或补偿把已有链接清空 |
 
-明确不进这张表：逐题过程、分享秘密、作废口令、完整 JSON、手机号、SCL-90 真实姓名、开放自述。
+明确不进这张表：逐题过程、作废口令、完整 JSON、手机号、SCL-90 真实姓名、开放自述。分享秘密只出现在「分享链接」的 hash 里。
 
 同步状态以 CloudBase 文档的 `feishuSync` 为准。镜像写失败时，文档仍在，状态变为「待重试」；飞书里可能没有这一行，或还留着旧状态。不能因为飞书没有行，就判断报告没有保存。
 

@@ -1,6 +1,6 @@
 import { byteSize, canonical, safeEqual, sha256 } from "./ids.mjs";
 import { MAX_BODY_BYTES, validateSecrets, validateStarResult } from "./validate.mjs";
-import { indexRow } from "./feishu.mjs";
+import { buildGithubShareUrl, indexRow } from "./feishu.mjs";
 import { GITHUB_PAGES_ORIGIN, HTTP_ORIGIN } from "./preview.mjs";
 
 const DUMMY_HASH = "0".repeat(64);
@@ -109,7 +109,16 @@ export function createHandler(options) {
         && safeEqual(existing.linkSecretHash, linkHash)
         && safeEqual(existing.ownerSecretHash, ownerHash);
       if (!same) return finish(409, { error: "conflict" });
-      const refreshed = existing.feishuSync === "待重试" ? await syncMirror(existing) : existing;
+      let current = existing;
+      let attachedLink = false;
+      if (!current.shareUrl) {
+        const shareUrl = buildGithubShareUrl(current.reportId, linkSecret);
+        if (shareUrl) {
+          current = await store.update(current.reportId, { shareUrl });
+          attachedLink = true;
+        }
+      }
+      const refreshed = current.feishuSync === "待重试" || attachedLink ? await syncMirror(current) : current;
       return finish(200, responseFor(refreshed, linkSecret, ownerToken));
     }
     if (await store.getByReportId(result.reportId)) return finish(409, { error: "conflict" });
@@ -117,8 +126,10 @@ export function createHandler(options) {
     const payload = normalize(result);
     const size = byteSize(payload);
     const now = new Date().toISOString();
+    const shareUrl = buildGithubShareUrl(result.reportId, linkSecret);
     let doc = {
       reportId: result.reportId,
+      shareUrl,
       sourceSubmissionId: submissionId,
       bodyHash: contentHash,
       byteSize: size,
