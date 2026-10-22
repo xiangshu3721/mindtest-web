@@ -6,6 +6,7 @@ import test from "node:test";
 import { WORDS } from "../../star/js/data.js";
 import { buildStarResult } from "../../star/js/cloud-payload.js";
 import { buildSefsResult } from "./vendor/sefs-payload.mjs";
+import { buildScl90Result } from "./vendor/scl90-payload.mjs";
 import { createHandler } from "./lib/handler.mjs";
 import { createCloudBaseStore, createMemoryStore, tableSql } from "./lib/store.mjs";
 import { buildGithubShareUrl, createFeishuHttpWriter, createFeishuIndex, feishuLiveReady, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
@@ -450,7 +451,7 @@ test("拒绝分数、其他测评、手机号字段、过大正文、错误来�
     result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
   })).status, 422);
   const other = result();
-  other.payload.assessmentId = "scl90";
+  other.payload.assessmentId = "pdq4";
   const rejected = await post({ handle }, "/v1/results", {
     result: other.payload, linkSecret: other.linkSecret, ownerToken: other.ownerToken,
   }, { ip: "203.0.113.30" });
@@ -920,6 +921,83 @@ test("SEFS 合法结果可以保存，飞书行带分享链接；作答被改过
     result: named.payload, linkSecret: named.linkSecret, ownerToken: named.ownerToken,
   }, { ip: "203.0.113.74" })).status, 422);
   assert.equal(store.size(), 1);
+});
+
+function scl90Body(answers, id = ids()) {
+  const payload = buildScl90Result({
+    nickname: "小林",
+    answers,
+    completedAt: "2026-10-22T20:00:00+08:00",
+    ...id,
+  });
+  return { payload, ...id };
+}
+
+test("SCL-90 按因子重算后可保存，改分数或未放行测评仍是 422，SEFS 仍可保存", async () => {
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock" });
+  const { handle, store } = app({ feishu });
+  const answers = Array(90).fill(1);
+  for (const n of [1, 4, 12, 27, 40, 42, 48, 49, 52, 53, 56, 58]) answers[n - 1] = 3;
+  const made = scl90Body(answers);
+  assert.equal(made.payload.dimensions[0].id, "som");
+  assert.equal(made.payload.dimensions[0].raw, 36);
+  assert.equal(made.payload.dimensions[0].score, 3);
+  assert.equal(made.payload.dimensions[0].level, "mild");
+  assert.equal(made.payload.result.headline, "筛查阳性");
+  assert.deepEqual(made.payload.dimensions.map((item) => item.id), ["som", "oc", "is", "dep", "anx", "hos", "phob", "par", "psy", "add"]);
+  const created = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  }, { headers: { origin: "https://xiangshu3721.github.io" }, ip: "203.0.113.80" });
+  assert.equal(created.status, 200);
+  assert.equal(feishu.rows[0]["测评 ID"], "scl90");
+  assert.equal(feishu.rows[0]["分享链接"], buildGithubShareUrl(made.reportId, made.linkSecret));
+  assert.equal(JSON.stringify(feishu.rows[0]).includes(JSON.stringify(answers)), false);
+  const read = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  }, { ip: "203.0.113.81" });
+  assert.equal(read.status, 200);
+  assert.equal(read.body.assessmentId, "scl90");
+  assert.equal(read.body.dimensions[3].id, "dep");
+  assert.equal(read.body.dimensions[3].score, 1);
+
+  const calm = scl90Body(Array(90).fill(1));
+  assert.equal(calm.payload.result.headline, "筛查阴性");
+  assert.equal(calm.payload.reportContent.viewModel.positiveMean, null);
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: calm.payload, linkSecret: calm.linkSecret, ownerToken: calm.ownerToken,
+  }, { ip: "203.0.113.82" })).status, 200);
+
+  const addOnly = Array(90).fill(1);
+  for (const n of [19, 44, 59, 60, 64, 66, 89]) addOnly[n - 1] = 5;
+  const additional = scl90Body(addOnly);
+  assert.equal(additional.payload.result.headline, "筛查阴性");
+  assert.equal(additional.payload.dimensions[9].score, 5);
+
+  const broken = scl90Body(answers);
+  broken.payload.dimensions[0].score = 1;
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: broken.payload, linkSecret: broken.linkSecret, ownerToken: broken.ownerToken,
+  }, { ip: "203.0.113.83" })).status, 422);
+  const short = scl90Body(answers.slice(0, 89));
+  assert.equal(short.payload, null);
+  const named = scl90Body(answers);
+  named.payload.assessmentName = "症状清单";
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: named.payload, linkSecret: named.linkSecret, ownerToken: named.ownerToken,
+  }, { ip: "203.0.113.84" })).status, 422);
+
+  const sefsAnswers = Array(24).fill(0);
+  for (let i = 6; i < 12; i += 1) sefsAnswers[i] = 3;
+  const sefs = buildSefsResult({
+    nickname: "小林",
+    answers: sefsAnswers,
+    completedAt: "2026-10-22T12:00:00+08:00",
+    ...ids(),
+  });
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: sefs, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.85" })).status, 200);
+  assert.equal(store.size(), 3);
 });
 
 test("其他测评页面没有接上云端块", async () => {

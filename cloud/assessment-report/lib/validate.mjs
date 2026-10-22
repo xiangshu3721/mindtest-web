@@ -325,9 +325,217 @@ export function validateSefsResult(result) {
   return issues;
 }
 
+const SCL90_FACTORS = [
+  { id: "som", name: "躯体化", items: [1, 4, 12, 27, 40, 42, 48, 49, 52, 53, 56, 58] },
+  { id: "oc", name: "强迫症状", items: [3, 9, 10, 28, 38, 45, 46, 51, 55, 65] },
+  { id: "is", name: "人际关系敏感", items: [6, 21, 34, 36, 37, 41, 61, 69, 73] },
+  { id: "dep", name: "抑郁", items: [5, 14, 15, 20, 22, 26, 29, 30, 31, 32, 54, 71, 79] },
+  { id: "anx", name: "焦虑", items: [2, 17, 23, 33, 39, 57, 72, 78, 80, 86] },
+  { id: "hos", name: "敌对", items: [11, 24, 63, 67, 74, 81] },
+  { id: "phob", name: "恐怖", items: [13, 25, 47, 50, 70, 75, 82] },
+  { id: "par", name: "偏执", items: [8, 18, 43, 68, 76, 83] },
+  { id: "psy", name: "精神病性", items: [7, 16, 35, 62, 77, 84, 85, 87, 88, 90] },
+  { id: "add", name: "其他", items: [19, 44, 59, 60, 64, 66, 89] },
+];
+const SCL90_LEVELS = [
+  { id: "none", label: "无明显症状", max: 2 },
+  { id: "mild", label: "轻度", max: 3 },
+  { id: "moderate", label: "中度", max: 4 },
+  { id: "severe", label: "重度", max: 5 },
+];
+const SCL90_VERDICT_POS = "筛查阳性";
+const SCL90_VERDICT_NEG = "筛查阴性";
+const SCL90_TEXT_POS = "按国内常用筛查标准，总分、阳性项目数、九个症状因子这三条里，至少有一条超过界值。这表示最近一周的不适，在范围或强度上需要认真看一看。它是筛查，不是诊断。";
+const SCL90_TEXT_NEG = "按国内常用筛查标准，总分未超过 160，阳性项目数未超过 43，九个症状因子的均分都没有超过 2。最近一周的这些感受，整体还在常用界值以内。量表不能排除所有问题。";
+
+function scl90Round2(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function scl90Level(mean) {
+  return SCL90_LEVELS.find((level) => mean <= level.max) || SCL90_LEVELS[SCL90_LEVELS.length - 1];
+}
+
+function scl90AnswersOk(list) {
+  return Array.isArray(list)
+    && list.length === 90
+    && list.every((value) => Number.isInteger(value) && value >= 1 && value <= 5);
+}
+
+function scl90Same(left, right) {
+  if (left == null && right == null) return true;
+  return typeof left === "number" && typeof right === "number" && Math.abs(left - right) < 0.001;
+}
+
+export function scoreScl90Answers(answers) {
+  const total = answers.reduce((sum, value) => sum + value, 0);
+  const positiveCount = answers.filter((value) => value >= 2).length;
+  const positiveSum = answers.reduce((sum, value) => sum + (value >= 2 ? value : 0), 0);
+  const positiveMean = positiveCount === 0 ? null : scl90Round2(positiveSum / positiveCount);
+  const factors = SCL90_FACTORS.map((factor) => {
+    const raw = factor.items.reduce((sum, n) => sum + answers[n - 1], 0);
+    const exact = raw / factor.items.length;
+    const level = scl90Level(exact);
+    return {
+      id: factor.id,
+      name: factor.name,
+      raw,
+      score: scl90Round2(exact),
+      exact,
+      level: level.id,
+      levelLabel: level.label,
+      screened: exact > 2,
+    };
+  });
+  const nineHit = factors.some((factor) => factor.id !== "add" && factor.screened);
+  const positive = total > 160 || positiveCount > 43 || nineHit;
+  return {
+    total,
+    gsi: scl90Round2(total / answers.length),
+    positiveCount,
+    negativeCount: answers.length - positiveCount,
+    positiveMean,
+    positive,
+    headline: positive ? SCL90_VERDICT_POS : SCL90_VERDICT_NEG,
+    summary: positive ? SCL90_TEXT_POS : SCL90_TEXT_NEG,
+    code: positive ? "positive" : "negative",
+    flags: positive ? ["positive"] : [],
+    factors,
+  };
+}
+
+export function validateScl90Result(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  scanKeys(result, issues, "result");
+  for (const key of Object.keys(result)) {
+    if (!TOP_KEYS.has(key)) issues.push(`不能保存额外字段 ${key}`);
+  }
+  if (!REPORT_ID_RE.test(String(result.reportId || ""))) issues.push("reportId 格式不对");
+  if (result.assessmentId !== "scl90") issues.push("测评不在可保存范围内");
+  const name = String(result.assessmentName || "");
+  if (!name.includes("SCL-90") || !name.includes("症状自评量表")) issues.push("测评名称不对");
+  if (typeof result.assessmentVersion !== "string" || result.assessmentVersion.length < 1 || result.assessmentVersion.length > 40) {
+    issues.push("规则版本不对");
+  }
+  if (result.schemaVersion !== SCHEMA_VERSION) issues.push("协议版本不对");
+  const nick = chars(result.nickname);
+  if (nick.length < 1 || nick.length > 12) issues.push("昵称需要 1–12 个字");
+  if (!Number.isFinite(Date.parse(result.completedAt))) issues.push("完成时间不对");
+
+  const view = result.reportContent && result.reportContent.viewModel;
+  const answers = view && view.answers;
+  const answersOk = scl90AnswersOk(answers);
+  if (!answersOk) issues.push("作答需要 90 道 1–5 的整数题");
+  const scored = answersOk ? scoreScl90Answers(answers) : null;
+
+  const dimensions = result.dimensions;
+  const viewFactors = view && view.factors;
+  if (!Array.isArray(dimensions) || dimensions.length !== 10) issues.push("SCL-90 需要十条因子");
+  else {
+    dimensions.forEach((side, index) => {
+      const spec = scored ? scored.factors[index] : SCL90_FACTORS[index];
+      if (!side || typeof side !== "object") {
+        issues.push(`因子 ${SCL90_FACTORS[index].id} 缺失`);
+        return;
+      }
+      if (side.id !== SCL90_FACTORS[index].id) issues.push(`${SCL90_FACTORS[index].id} 标识不对`);
+      if (side.name !== SCL90_FACTORS[index].name) issues.push(`${SCL90_FACTORS[index].id} 名称不对`);
+      if (side.kind !== "score") issues.push(`${SCL90_FACTORS[index].id} 必须是分数维度`);
+      if (side.max !== 5) issues.push(`${SCL90_FACTORS[index].id} 满分不对`);
+      if (side.labels != null && (!Array.isArray(side.labels) || side.labels.length !== 0)) {
+        issues.push(`${SCL90_FACTORS[index].id} 不保存词`);
+      }
+      if (scored && !scl90Same(side.score, spec.score)) issues.push(`${SCL90_FACTORS[index].id} 分数与作答不一致`);
+      if (scored && side.raw !== spec.raw) issues.push(`${SCL90_FACTORS[index].id} 原始分与作答不一致`);
+      if (scored && side.level !== spec.level) issues.push(`${SCL90_FACTORS[index].id} 分段不对`);
+      if (scored && side.levelLabel !== spec.levelLabel) issues.push(`${SCL90_FACTORS[index].id} 分段名称不对`);
+      const viewSide = Array.isArray(viewFactors) ? viewFactors[index] : null;
+      if (!viewSide || viewSide.id !== side.id || (scored && (!scl90Same(viewSide.score, spec.score) || viewSide.raw !== spec.raw))) {
+        issues.push(`${SCL90_FACTORS[index].id} 视图与维度不一致`);
+      }
+    });
+  }
+
+  const outcome = result.result;
+  if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) issues.push("缺少结论");
+  else if (scored) {
+    if (outcome.headline !== scored.headline) issues.push("结论与筛查结果不一致");
+    if (outcome.summary !== scored.summary) issues.push("摘要与筛查结果不一致");
+    if (outcome.code !== scored.code) issues.push("筛查码与作答不一致");
+    if (outcome.label !== scored.headline) issues.push("结论标签不对");
+    if (JSON.stringify(outcome.flags) !== JSON.stringify(scored.flags)) issues.push("分数标记与作答不一致");
+  }
+
+  if (!Array.isArray(result.interpretation) || !Array.isArray(result.recommendations)) {
+    issues.push("解释和建议必须是列表");
+  }
+  if (!result.reportContent || result.reportContent.format !== "view-model+sections") {
+    issues.push("报告快照格式不对");
+  }
+  if (!view) issues.push("缺少视图");
+  else if (scored) {
+    if (view.total !== scored.total) issues.push("总分与作答不一致");
+    if (!scl90Same(view.gsi, scored.gsi)) issues.push("总症状指数与作答不一致");
+    if (view.positiveCount !== scored.positiveCount) issues.push("阳性项目数与作答不一致");
+    if (!scl90Same(view.positiveMean, scored.positiveMean)) issues.push("阳性症状均分与作答不一致");
+    if (view.positive !== scored.positive) issues.push("筛查结论与作答不一致");
+  }
+  const raw = JSON.stringify(result.reportContent || {});
+  if (/data:(image|application\/pdf)|<!doctype|<html/i.test(raw)) issues.push("不能保存图片、PDF 或 HTML");
+
+  const extension = result.extensionData;
+  const consent = extension && extension.consent;
+  if (!consent || consent.agreed !== true) issues.push("未同意不能保存");
+  if (consent && (typeof consent.version !== "string" || consent.version.length < 1 || consent.version.length > 40)) {
+    issues.push("同意文案版本不对");
+  }
+  const scopes = consent && consent.scopes;
+  if (!Array.isArray(scopes) || !scopes.includes("store") || !scopes.includes("share_link")) {
+    issues.push("同意范围不足");
+  }
+  const attribution = extension && extension.attribution;
+  if (attribution && typeof attribution === "object") {
+    for (const key of ["mentorId", "activity"]) {
+      if (attribution[key] == null || attribution[key] === "") continue;
+      if (typeof attribution[key] !== "string" || Array.from(attribution[key]).length > 40) {
+        issues.push(`${key} 太长`);
+      }
+    }
+  }
+  if (scored) {
+    const stored = extension && extension.score;
+    const storedFactors = stored && stored.factors;
+    if (!stored
+      || stored.total !== scored.total
+      || !scl90Same(stored.gsi, scored.gsi)
+      || stored.positiveCount !== scored.positiveCount
+      || !scl90Same(stored.positiveMean, scored.positiveMean)
+      || stored.positive !== scored.positive
+      || !Array.isArray(storedFactors)
+      || storedFactors.length !== 10
+      || storedFactors.some((factor, index) => !factor
+        || factor.id !== scored.factors[index].id
+        || factor.raw !== scored.factors[index].raw
+        || !scl90Same(factor.mean, scored.factors[index].score))) {
+      issues.push("扩展分数与作答不一致");
+    }
+    if (JSON.stringify(extension.answers) !== JSON.stringify(answers)) issues.push("扩展作答与视图不一致");
+  }
+
+  const source = result.source;
+  if (!source || source.origin !== "external-repo" || source.repo !== "mindtest" || source.path !== "scl90/index.html") {
+    issues.push("来源不对");
+  }
+  if (!source || !SUBMISSION_RE.test(String(source.clientSubmissionId || ""))) issues.push("提交号格式不对");
+  if (source && source.resultKitId !== "scl90") issues.push("resultKit 标识不对");
+  return issues;
+}
+
 export function validateAssessmentResult(result) {
   if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
   if (result.assessmentId === "sefs") return validateSefsResult(result);
   if (result.assessmentId === "star") return validateStarResult(result);
+  if (result.assessmentId === "scl90") return validateScl90Result(result);
   return ["测评不在可保存范围内"];
 }
