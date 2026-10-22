@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { WORDS } from "../star/js/data.js";
 import { buildStarResult } from "../star/js/cloud-payload.js";
+import { FACTORS } from "../scl90/js/data.js";
+import { scoreScl90 } from "../scl90/js/score.js";
 import { renderReport } from "./report-render.js";
 
 const when = "2026-10-22T09:30:00+08:00";
@@ -225,4 +227,424 @@ test("SEFS 阅读页转义昵称和洞察，缺分数时不显示假的 0 分", 
   assert.equal(html.includes("sefs-total-num"), false);
   assert.equal(html.includes("这份结果里没有可显示的分数。"), true);
   assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+});
+
+const SCL_NAMES = ["躯体化", "强迫症状", "人际关系敏感", "抑郁", "焦虑", "敌对", "恐怖", "偏执", "精神病性", "其他"];
+
+function sclProtocol(scored, extra = {}) {
+  return {
+    assessmentId: "scl90",
+    assessmentName: "SCL-90 症状自评量表",
+    assessmentVersion: extra.version || "scl90-rules-2026-10",
+    nickname: extra.nickname || "阿禾",
+    completedAt: when,
+    dimensions: scored.factors.map((factor) => ({
+      id: factor.id,
+      name: factor.name,
+      kind: "score",
+      score: factor.mean === 1 ? 9 : factor.mean,
+      max: 5,
+      raw: factor.raw,
+      level: factor.level,
+      levelLabel: factor.levelLabel,
+      narrative: factor.narrative,
+    })),
+    result: {
+      headline: `${scored.verdictTitle} · 总症状指数 ${scored.gsi.toFixed(2)}（${scored.gsiLabel}）`,
+      code: null,
+      label: "筛查不是诊断",
+      summary: "旧摘要，不应盖过 verdictText",
+      flags: [scored.positive ? "positive" : "negative"].concat(scored.crisis ? [`crisis-${scored.crisis.level}`] : []),
+    },
+    interpretation: [
+      { id: "verdict", text: scored.verdictText },
+      { id: "gsi", text: scored.gsiText },
+      ...scored.factors.map((factor) => ({ id: factor.id, text: factor.narrative })),
+      scored.crisis ? { id: "crisis", text: scored.crisis.text } : null,
+      { id: "only-here", text: "只在解释里出现的一句。" },
+    ].filter(Boolean),
+    recommendations: scored.guidance.map((line, index) => ({ id: `guide-${index}`, text: line })),
+    reportContent: {
+      format: "view-model+sections",
+      viewModel: {
+        answers: extra.answers,
+        factors: scored.factors,
+        ranked: scored.ranked,
+        gsi: scored.gsi,
+        total: scored.total,
+        positiveCount: scored.positiveCount,
+        negativeCount: scored.negativeCount,
+        positiveMean: scored.positiveMean,
+        crisis: scored.crisis,
+        guidance: scored.guidance.map((line) => `不该重复的引导：${line}`),
+        rules: scored.rules,
+        norms: scored.norms,
+        gsiLabel: scored.gsiLabel,
+        gsiText: scored.gsiText,
+        verdictTitle: scored.verdictTitle,
+        verdictText: scored.verdictText,
+        positive: scored.positive,
+        notable: scored.notable,
+        profile: extra.profile,
+      },
+    },
+    extensionData: {
+      score: { ...scored, total: 1, gsi: 9, positiveCount: 1, positiveMean: 9, verdictTitle: "不该出现的标题" },
+      answers: extra.answers,
+      profile: extra.profile || null,
+      quality: { rushed: Boolean(extra.rushed) },
+    },
+  };
+}
+
+test("SCL-90 统一协议画出十因子、总分、GSI 和阳性项", () => {
+  const answers = Array(90).fill(1);
+  const scored = scoreScl90(answers);
+  const html = renderReport(sclProtocol(scored, { answers }));
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("SCL-90 症状自评量表"), true);
+  assert.equal(html.includes("筛查不是诊断"), true);
+  assert.equal(html.includes("筛查阴性"), true);
+  assert.equal(html.includes("不该出现的标题"), false);
+  assert.equal(html.includes("旧摘要，不应盖过 verdictText"), false);
+  assert.equal(html.includes("<strong>1.00</strong>"), true);
+  assert.equal(html.includes("总症状指数 · 没有明显症状"), true);
+  assert.equal(html.includes("<b>90</b><span>总分</span>"), true);
+  assert.equal(html.includes("<b>0</b><span>阳性项目</span>"), true);
+  assert.equal(html.includes("<b>90</b><span>阴性项目</span>"), true);
+  assert.equal(html.includes("<b>—</b><span>阳性症状均分</span>"), true);
+  assert.equal(html.includes(">1</b><span>总分"), false);
+  assert.equal(html.includes("0.00"), false);
+  for (const name of SCL_NAMES) assert.equal(html.includes(name), true, name);
+  for (let i = 1; i < SCL_NAMES.length; i += 1) {
+    assert.equal(html.indexOf(SCL_NAMES[i - 1]) < html.indexOf(SCL_NAMES[i]), true, SCL_NAMES[i]);
+  }
+  assert.equal(html.includes("1.00 <small>/ 5</small>"), true);
+  assert.equal(html.includes("9.00"), false);
+  assert.equal(html.includes("无明显症状"), true);
+  assert.equal(html.split('class="scl-pill"').length - 1, 3);
+  assert.equal(html.includes("scl-pill-hit"), false);
+  assert.equal(html.includes("scl-crisis"), false);
+  assert.equal(html.includes("请先看这里"), false);
+  assert.equal(html.includes("没有题目达到偏重或严重。"), true);
+  assert.equal(html.split("最近一周，身体不适没有聚成一组明显的躯体主诉。").length - 1, 1);
+  assert.equal(html.split("三条界值都没有超过").length - 1, 1);
+  assert.equal(html.includes("不该重复的引导"), false);
+  assert.equal(html.includes("只在解释里出现的一句。"), true);
+  assert.equal(html.includes("也不能代替面谈"), true);
+  assert.equal(html.includes("阿禾"), true);
+  assert.equal(html.includes("scl90-rules-2026-10"), true);
+  assert.equal(html.includes("2026年10月22日"), true);
+  assert.equal(html.includes("底层动力"), false);
+  assert.equal(html.includes("体验广度"), false);
+  assert.equal(FACTORS.length, 10);
+});
+
+test("SCL-90 危机提示在分数前面，严重档用醒目样式", () => {
+  const answers = Array(90).fill(5);
+  const html = renderReport(sclProtocol(scoreScl90(answers), { answers }));
+  assert.equal(html.includes("筛查阳性"), true);
+  assert.equal(html.includes("scl-tag-pos"), true);
+  assert.equal(html.includes("<strong>5.00</strong>"), true);
+  assert.equal(html.includes("<b>450</b><span>总分</span>"), true);
+  assert.equal(html.includes("<b>90</b><span>阳性项目</span>"), true);
+  assert.equal(html.includes("<b>5.00</b><span>阳性症状均分</span>"), true);
+  assert.equal(html.includes("scl-crisis-hot"), true);
+  assert.equal(html.includes("请先看这里"), true);
+  assert.equal(html.includes("12356"), true);
+  assert.equal(html.includes("120"), true);
+  assert.equal(html.indexOf("请先看这里") < html.indexOf("总症状指数"), true);
+  assert.equal(html.indexOf("请先看这里") < html.indexOf("<strong>5.00</strong>"), true);
+  assert.equal(html.split("请先看这里").length - 1, 1);
+  assert.equal(html.includes("scl-pill-hit"), true);
+  assert.equal(html.includes("重度"), true);
+  assert.equal(html.includes("偏重和严重的条目（90）"), true);
+  assert.equal(html.includes("它是筛查，不是诊断。"), true);
+});
+
+test("SCL-90 死亡念头用较轻但仍独立的提示", () => {
+  const answers = Array(90).fill(1);
+  answers[58] = 5;
+  const html = renderReport(sclProtocol(scoreScl90(answers), { answers }));
+  assert.equal(html.includes("scl-crisis-note"), true);
+  assert.equal(html.includes("关于死亡的想法"), true);
+  assert.equal(html.includes("这不等于要结束生命"), true);
+  assert.equal(html.includes("scl-crisis-hot"), false);
+  assert.equal(html.indexOf("关于死亡的想法") < html.indexOf("十个方面"), true);
+});
+
+test("SCL-90 只给了 dimensions 和总分时仍能读，均分不重算", () => {
+  const html = renderReport({
+    assessmentId: "scl90",
+    assessmentName: "SCL-90 症状自评量表",
+    assessmentVersion: "scl90-rules-2026-10",
+    nickname: "小林",
+    completedAt: when,
+    dimensions: [
+      { id: "anx", name: "焦虑", kind: "score", score: 1.25, max: 5 },
+      { id: "dep", name: "抑郁", kind: "score", score: 3.5, max: 5, level: "moderate", levelLabel: "中度", narrative: "低落已经比较稳定。" },
+    ],
+    reportContent: {
+      format: "view-model+sections",
+      viewModel: { total: 140, gsi: 1.56, positiveCount: 20, positiveMean: 2.1 },
+    },
+  });
+  assert.equal(html.includes("<strong>1.56</strong>"), true);
+  assert.equal(html.includes("<b>140</b><span>总分</span>"), true);
+  assert.equal(html.includes("<b>20</b><span>阳性项目</span>"), true);
+  assert.equal(html.includes("<b>2.10</b><span>阳性症状均分</span>"), true);
+  assert.equal(html.includes("1.25 <small>/ 5</small>"), true);
+  assert.equal(html.includes("3.50 <small>/ 5</small>"), true);
+  assert.equal(html.includes("中度"), true);
+  assert.equal(html.includes("无明显症状"), true);
+  assert.equal(html.split("低落已经比较稳定。").length - 1, 1);
+  assert.equal(html.indexOf("躯体化") < html.indexOf("抑郁"), true);
+  assert.equal(html.indexOf("抑郁") < html.indexOf("焦虑"), true);
+  assert.equal(html.includes("scl-crisis"), false);
+  assert.equal(html.includes("这份结果里没有可显示的分数。"), false);
+  for (const name of SCL_NAMES) assert.equal(html.includes(name), true, name);
+});
+
+test("SCL-90 没有 viewModel 时退回 extensionData.score", () => {
+  const scored = scoreScl90(Array(90).fill(2));
+  const html = renderReport({
+    assessmentId: "scl90",
+    assessmentName: "SCL-90 症状自评量表",
+    nickname: "阿禾",
+    completedAt: when,
+    assessmentVersion: "scl90-rules-2026-10",
+    extensionData: { score: scored, profile: { name: "林深", gender: "女", age: "20岁以下" }, quality: { rushed: true } },
+  });
+  assert.equal(html.includes("<strong>2.00</strong>"), true);
+  assert.equal(html.includes("<b>180</b><span>总分</span>"), true);
+  assert.equal(html.includes("筛查阳性"), true);
+  assert.equal(html.includes("林深 · 女 · 20岁以下"), true);
+  assert.equal(html.includes("不宜直接套用成人界值"), true);
+  assert.equal(html.includes("作答偏快"), true);
+  assert.equal(html.includes("全国常模里，总分约 129.96 ± 38.76"), true);
+});
+
+test("SCL-90 缺字段时降级，不白屏，也不把空分画成 0", () => {
+  const html = renderReport({ assessmentId: "scl90", nickname: "阿禾", completedAt: when });
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("这份结果里没有可显示的分数。"), true);
+  assert.equal(html.includes("筛查不是诊断"), true);
+  assert.equal(html.includes("也不能代替面谈"), true);
+  assert.equal(html.includes("sefs-total-num"), false);
+  assert.equal(html.includes("scl-stats"), false);
+  assert.equal(html.includes("0.00"), false);
+  for (const name of SCL_NAMES) assert.equal(html.includes(name), true, name);
+  assert.equal(renderReport({
+    assessmentId: "scl90",
+    dimensions: "bad",
+    interpretation: [null, { text: 3 }],
+    reportContent: { viewModel: { factors: [null, 1, { mean: "nope" }], rules: [{ label: "x" }], crisis: 4 } },
+  }).includes("十个方面"), true);
+});
+
+test("SCL-90 明确没有危机时不从答案推断；解释里的危机文案仍然置顶", () => {
+  const answers = Array(90).fill(1);
+  answers[14] = 5;
+  const quiet = renderReport({
+    assessmentId: "scl90",
+    reportContent: { format: "view-model+sections", viewModel: { answers, crisis: null, gsi: 1.2, total: 108 } },
+  });
+  assert.equal(quiet.includes("请先看这里"), false);
+  assert.equal(quiet.includes("12356"), false);
+
+  const fromAnswers = renderReport({
+    assessmentId: "scl90",
+    reportContent: { format: "view-model+sections", viewModel: { answers, total: 108 } },
+  });
+  assert.equal(fromAnswers.includes("scl-crisis-hot"), true);
+  assert.equal(fromAnswers.includes("想结束自己的生命"), true);
+  assert.equal(fromAnswers.indexOf("请先看这里") < fromAnswers.indexOf("十个方面"), true);
+
+  const noted = renderReport({
+    assessmentId: "scl90",
+    result: { flags: ["crisis-note"] },
+    interpretation: [{ id: "crisis", text: "你在“想到有关死亡的事”上需要有人陪。可以打 12356。" }],
+    reportContent: { viewModel: { crisis: null, gsi: 1.1 } },
+  });
+  assert.equal(noted.includes("关于死亡的想法"), true);
+  assert.equal(noted.includes("可以打 12356。"), true);
+  assert.equal(noted.includes("scl-crisis-note"), true);
+});
+
+test("SCL-90 阅读页转义昵称、因子叙述和危机文案", () => {
+  const html = renderReport({
+    assessmentId: "scl90",
+    assessmentName: "<img src=x onerror=alert(1)>",
+    nickname: "<script>alert(1)</script>",
+    completedAt: when,
+    dimensions: [{ id: "som", name: "<b>躯体</b>", kind: "score", score: 2, narrative: "<script>alert(1)</script>" }],
+    reportContent: {
+      viewModel: { gsi: 2, crisis: { level: "urgent", text: "<script>bad</script>" } },
+    },
+  });
+  assert.equal(html.includes("<script>"), false);
+  assert.equal(html.includes("<img"), false);
+  assert.equal(html.includes("<b>躯体"), false);
+  assert.equal(html.includes("&lt;script&gt;"), true);
+  assert.equal(html.includes("强迫症状"), true);
+  assert.equal(html.includes("scl-crisis-hot"), true);
+});
+
+function sclPayload(answers, extra = {}) {
+  const scored = scoreScl90(answers);
+  const factors = scored.factors.map((factor) => ({
+    id: factor.id,
+    name: factor.name,
+    raw: factor.raw,
+    score: factor.mean,
+    mean: factor.mean,
+    level: factor.level,
+    levelLabel: factor.levelLabel,
+    screened: factor.screened,
+    aboveNorm: factor.aboveNorm,
+  }));
+  const interpretation = [];
+  if (scored.crisis) {
+    interpretation.push({
+      id: "crisis",
+      title: scored.crisis.level === "note" ? "关于死亡的想法" : "请先看这里",
+      text: scored.crisis.text,
+    });
+  }
+  interpretation.push({ id: "gsi", title: scored.gsiLabel, text: scored.gsiText });
+  for (const factor of scored.factors) {
+    interpretation.push({
+      id: factor.id,
+      title: factor.name,
+      text: `${factor.levelLabel}，均分 ${factor.mean.toFixed(2)}。${factor.narrative}`,
+    });
+  }
+  const sections = [];
+  if (scored.crisis) sections.push({ t: "p", x: scored.crisis.text });
+  sections.push(
+    { t: "h", l: 2, x: scored.verdictTitle },
+    { t: "p", x: scored.verdictText },
+    { t: "p", x: scored.gsiText },
+    { t: "ul", it: factors.map((factor) => ({ x: `${factor.name} ${factor.score.toFixed(2)} · ${factor.levelLabel}`, d: 0, n: 0 })) },
+  );
+  for (const line of scored.guidance) sections.push({ t: "p", x: line });
+  return {
+    assessmentId: "scl90",
+    assessmentName: "SCL-90 症状自评量表",
+    assessmentVersion: "scl90-cn-1986-v1",
+    nickname: "阿禾",
+    completedAt: when,
+    dimensions: scored.factors.map((factor) => ({
+      id: factor.id,
+      name: factor.name,
+      kind: "score",
+      score: factor.mean,
+      raw: factor.raw,
+      max: 5,
+      level: factor.level,
+      levelLabel: factor.levelLabel,
+      narrative: factor.narrative,
+      labels: [],
+    })),
+    result: {
+      headline: scored.verdictTitle,
+      code: scored.positive ? "positive" : "negative",
+      label: scored.verdictTitle,
+      summary: scored.verdictText,
+      flags: scored.positive ? ["positive"] : [],
+    },
+    interpretation,
+    recommendations: scored.guidance.map((text, index) => ({ id: `guide-${index + 1}`, title: null, text })),
+    reportContent: {
+      format: "view-model+sections",
+      viewModel: {
+        answers,
+        total: scored.total,
+        gsi: scored.gsi,
+        gsiLabel: scored.gsiLabel,
+        gsiText: scored.gsiText,
+        positiveCount: scored.positiveCount,
+        negativeCount: scored.negativeCount,
+        positiveMean: scored.positiveMean,
+        positive: scored.positive,
+        verdictTitle: scored.verdictTitle,
+        verdictText: scored.verdictText,
+        factors,
+        rules: scored.rules,
+        crisis: scored.crisis,
+        guidance: scored.guidance.slice(),
+        rushed: Boolean(extra.rushed),
+      },
+      sections,
+    },
+    extensionData: {
+      answers: answers.slice(),
+      score: scored,
+      quality: { rushed: Boolean(extra.rushed) },
+    },
+  };
+}
+
+test("SCL-90 按 mindtest cloud-payload 的形状阅读，十因子不按高低重排", () => {
+  const answers = Array(90).fill(1);
+  for (const n of FACTORS.find((factor) => factor.id === "dep").items) answers[n - 1] = 4;
+  answers[14] = 2;
+  const scored = scoreScl90(answers);
+  const html = renderReport(sclPayload(answers));
+  assert.equal(scored.ranked[0].id, "dep");
+  assert.equal(scored.crisis.level, "alert");
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("scl90-cn-1986-v1"), true);
+  assert.equal(html.includes(`<strong>${scored.gsi.toFixed(2)}</strong>`), true);
+  assert.equal(html.includes(`<b>${scored.total}</b><span>总分</span>`), true);
+  assert.equal(html.includes(`<b>${scored.positiveCount}</b><span>阳性项目</span>`), true);
+  assert.equal(html.includes(`<b>${scored.positiveMean.toFixed(2)}</b><span>阳性症状均分</span>`), true);
+  assert.equal(html.includes("筛查阳性"), true);
+  assert.equal(html.includes("scl-crisis-hot"), true);
+  assert.equal(html.split("请先看这里").length - 1, 1);
+  assert.equal(html.split(scored.crisis.text).length - 1, 1);
+  assert.equal(html.indexOf("请先看这里") < html.indexOf("总症状指数"), true);
+  assert.equal(html.split(scored.gsiText).length - 1, 1);
+  assert.equal(html.includes(`${scored.gsiLabel}：${scored.gsiText}`), false);
+  for (let i = 1; i < SCL_NAMES.length; i += 1) {
+    assert.equal(html.indexOf(`<h3>${SCL_NAMES[i - 1]}</h3>`) < html.indexOf(`<h3>${SCL_NAMES[i]}</h3>`), true, SCL_NAMES[i]);
+  }
+  const dep = scored.factors.find((factor) => factor.id === "dep");
+  assert.equal(html.split(dep.narrative).length - 1, 1);
+  assert.equal(html.includes(`均分 ${dep.mean.toFixed(2)}。`), false);
+  assert.equal(html.split(scored.guidance[0]).length - 1, 1);
+  assert.equal(html.includes("全国常模里，总分约 129.96 ± 38.76"), true);
+});
+
+test("SCL-90 阴性筛查没有 positive 旗标时仍写出筛查阴性", () => {
+  const html = renderReport(sclPayload(Array(90).fill(1)));
+  assert.equal(html.includes("筛查阴性"), true);
+  assert.equal(html.includes("scl-crisis"), false);
+  assert.equal(html.includes("scl-tag-pos"), false);
+});
+
+test("SCL-90 只有 interpretation 里的危机和因子句时也能读", () => {
+  const html = renderReport({
+    assessmentId: "scl90",
+    assessmentName: "SCL-90 症状自评量表",
+    result: { code: "negative", flags: [] },
+    interpretation: [
+      { id: "crisis", title: "请先看这里", text: "请联系全国心理援助热线 12356。" },
+      { id: "gsi", title: "有症状，并不频繁", text: "总症状指数落在常见的一段说明里。" },
+      { id: "dep", title: "抑郁", text: "中度，均分 3.20。低落已经比较稳定。" },
+    ],
+    reportContent: {
+      format: "view-model+sections",
+      viewModel: { total: 140, gsi: 1.56, positiveCount: 12, positiveMean: 2.4 },
+    },
+  });
+  assert.equal(html.includes("筛查阴性"), true);
+  assert.equal(html.includes("scl-crisis-hot"), true);
+  assert.equal(html.split("请联系全国心理援助热线 12356。").length - 1, 1);
+  assert.equal(html.indexOf("请先看这里") < html.indexOf("<strong>1.56</strong>"), true);
+  assert.equal(html.split("总症状指数落在常见的一段说明里。").length - 1, 1);
+  assert.equal(html.includes("有症状，并不频繁：总症状指数"), false);
+  assert.equal(html.split("低落已经比较稳定。").length - 1, 1);
+  assert.equal(html.includes("均分 3.20。"), false);
+  assert.equal(html.includes("3.20 <small>/ 5</small>"), true);
 });

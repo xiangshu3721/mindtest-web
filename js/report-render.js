@@ -404,8 +404,687 @@ export function renderSefsReport(report) {
   `;
 }
 
+// SCL-90 阅读约定：不按 90 题重算因子分。统一协议 dimensions 的 score 是均分；
+// viewModel 优先，其次 dimensions，再退到 extensionData.score（score.js 的返回）。
+// 十因子固定按 som oc is dep anx hos phob par psy add，不按 ranked 重排。
+// 缺数字留「—」，不补 0。危机文案（viewModel.crisis 或 interpretation id=crisis）放在分数前面。
+// 结构化 crisis 为空时，不再从答案推断。
+const SCL_ORDER = ["som", "oc", "is", "dep", "anx", "hos", "phob", "par", "psy", "add"];
+const SCL_NAMES = {
+  som: "躯体化",
+  oc: "强迫症状",
+  is: "人际关系敏感",
+  dep: "抑郁",
+  anx: "焦虑",
+  hos: "敌对",
+  phob: "恐怖",
+  par: "偏执",
+  psy: "精神病性",
+  add: "其他",
+};
+const SCL_ALIAS = {
+  somatization: "som",
+  somatic: "som",
+  obsessive: "oc",
+  obsession: "oc",
+  interpersonal: "is",
+  depression: "dep",
+  anxiety: "anx",
+  hostility: "hos",
+  phobic: "phob",
+  phobia: "phob",
+  paranoid: "par",
+  paranoia: "par",
+  psychotic: "psy",
+  psychosis: "psy",
+  additional: "add",
+  other: "add",
+};
+const SCL_LEVELS = {
+  none: "无明显症状",
+  mild: "轻度",
+  moderate: "中度",
+  severe: "重度",
+};
+const SCL_LEVEL_NAME = {
+  无明显症状: "none",
+  轻度: "mild",
+  中度: "moderate",
+  重度: "severe",
+};
+const SCL_NOTICE = "这是筛查，不是诊断，也不能代替面谈。";
+const SCL_CRISIS = {
+  urgent: "第 15 题是“想结束自己的生命”，你选了偏重或严重。如果这个想法最近反复出现，或者你担心自己可能行动，请现在就联系能马上回应你的人：全国心理援助热线 12356，或当地急救 120。这份量表不能代替危机帮助。",
+  alert: "第 15 题是“想结束自己的生命”，这次的选择已经离开了「没有」。如果它变频繁，或你开始觉得自己可能行动，请联系全国心理援助热线 12356，或告诉一个此刻能陪着你的人。",
+  note: "你在“想到有关死亡的事”上选了偏重或严重。这不等于要结束生命，但如果这些想法停不下来，可以打全国心理援助热线 12356，让另一个人帮你把它放到台面上。",
+};
+const SCL_OPTIONS = { 1: "没有", 2: "很轻", 3: "中等", 4: "偏重", 5: "严重" };
+
+function asObj(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function owns(obj, key) {
+  return Boolean(obj && Object.prototype.hasOwnProperty.call(obj, key));
+}
+
+function fixed2(value) {
+  if (value == null) return "—";
+  return (Math.round(value * 100) / 100).toFixed(2);
+}
+
+function showCount(value) {
+  if (value == null) return "—";
+  if (Number.isInteger(value)) return String(value);
+  return fixed2(value);
+}
+
+function showTrim(value) {
+  if (value == null) return "";
+  return String(Math.round(value * 100) / 100);
+}
+
+function sourcesOf(report) {
+  const viewModel = viewModelOf(report);
+  const extension = asObj(report && report.extensionData) || {};
+  return {
+    viewModel,
+    viewScore: asObj(viewModel.score),
+    score: asObj(extension.score),
+    extension,
+    result: asObj(report && report.result) || {},
+  };
+}
+
+function pickState(sources, keys) {
+  for (const key of keys) {
+    for (const obj of sources) {
+      if (!owns(obj, key)) continue;
+      if (obj[key] === null) return { present: true, value: null };
+      const value = num(obj[key]);
+      if (value != null) return { present: true, value };
+    }
+  }
+  return { present: false, value: null };
+}
+
+function pickText(sources, keys) {
+  for (const key of keys) {
+    for (const obj of sources) {
+      if (!obj) continue;
+      const value = text(obj[key]);
+      if (value) return value;
+    }
+  }
+  return "";
+}
+
+function pickBool(sources, key) {
+  for (const obj of sources) {
+    if (obj && typeof obj[key] === "boolean") return obj[key];
+  }
+  return null;
+}
+
+function sclSlotId(raw) {
+  if (!raw || typeof raw !== "object") return "";
+  const id = text(raw.id).toLowerCase();
+  if (SCL_ORDER.includes(id)) return id;
+  if (SCL_ALIAS[id]) return SCL_ALIAS[id];
+  const name = text(raw.name);
+  const named = Object.keys(SCL_NAMES).find((key) => SCL_NAMES[key] === name);
+  if (named) return named;
+  if (id) return `x:${id}`;
+  if (name) return `n:${name}`;
+  return "";
+}
+
+function emptySclSlot(id) {
+  return {
+    id,
+    name: SCL_NAMES[id] || "",
+    score: null,
+    max: 5,
+    raw: null,
+    count: null,
+    level: "",
+    levelLabel: "",
+    about: "",
+    narrative: "",
+    aboveNorm: null,
+    normMean: null,
+    normSd: null,
+  };
+}
+
+function sclLevelId(raw) {
+  const id = text(raw.level).toLowerCase();
+  if (SCL_LEVELS[id]) return id;
+  const label = text(raw.levelLabel) || text(raw.level);
+  return SCL_LEVEL_NAME[label] || "";
+}
+
+function applySclFactor(slots, raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+  const id = sclSlotId(raw);
+  if (!id) return;
+  if (!slots.has(id)) slots.set(id, emptySclSlot(id));
+  const slot = slots.get(id);
+  const extra = asObj(raw.extra) || {};
+  const name = text(raw.name);
+  if (name) slot.name = name;
+  const mean = num(raw.mean);
+  const score = num(raw.score);
+  if (mean != null) slot.score = mean;
+  else if (score != null) slot.score = score;
+  const max = num(raw.max);
+  if (max != null && max > 1) slot.max = max;
+  const rawScore = num(raw.raw);
+  if (rawScore != null) slot.raw = rawScore;
+  const count = num(raw.count);
+  if (count != null && count > 0) slot.count = count;
+  else if (Array.isArray(raw.items) && raw.items.length) slot.count = raw.items.length;
+  const level = sclLevelId(raw) || sclLevelId(extra);
+  if (level) slot.level = level;
+  const levelLabel = text(raw.levelLabel) || text(extra.levelLabel) || (level ? SCL_LEVELS[level] : "");
+  if (levelLabel) slot.levelLabel = levelLabel;
+  const about = text(raw.about) || text(extra.about);
+  if (about) slot.about = about;
+  const narrative = text(raw.narrative) || text(extra.narrative);
+  if (narrative) slot.narrative = narrative;
+  if (typeof raw.aboveNorm === "boolean") slot.aboveNorm = raw.aboveNorm;
+  const norm = asObj(raw.norm);
+  if (norm) {
+    const normMean = num(norm.mean);
+    const normSd = num(norm.sd);
+    if (normMean != null) slot.normMean = normMean;
+    if (normSd != null) slot.normSd = normSd;
+  }
+}
+
+function applySclList(slots, list) {
+  if (!Array.isArray(list)) return;
+  list.forEach((item) => applySclFactor(slots, item));
+}
+
+function levelFromMean(mean) {
+  if (mean == null) return "";
+  if (mean <= 2) return "none";
+  if (mean <= 3) return "mild";
+  if (mean <= 4) return "moderate";
+  return "severe";
+}
+
+function gsiLabelFrom(gsi) {
+  if (gsi == null) return "";
+  if (gsi <= 1.5) return "没有明显症状";
+  if (gsi <= 2.5) return "有症状，并不频繁";
+  if (gsi <= 3.5) return "轻到中度";
+  if (gsi <= 4.5) return "中到严重";
+  return "十分严重";
+}
+
+function orderedSlots(slots, rankedIds, dimensionIds) {
+  const seen = new Set();
+  const order = [];
+  const push = (id) => {
+    if (!id || seen.has(id) || !slots.has(id)) return;
+    seen.add(id);
+    order.push(slots.get(id));
+  };
+  const preferred = rankedIds && rankedIds.length ? rankedIds : dimensionIds;
+  (preferred || []).forEach(push);
+  SCL_ORDER.forEach(push);
+  slots.forEach((_slot, id) => push(id));
+  return order;
+}
+
+function idList(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((item) => (typeof item === "string" ? sclSlotId({ id: item }) : sclSlotId(item))).filter(Boolean);
+}
+
+function blocksOf(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((item) => item && text(item.text))
+    .map((item) => ({ id: text(item.id).toLowerCase(), title: text(item.title), text: text(item.text) }));
+}
+
+function isCrisisBlock(block) {
+  if (!block) return false;
+  if (block.id === "crisis" || block.id.startsWith("crisis-")) return true;
+  if (block.text.includes("想结束自己的生命")) return true;
+  if (block.text.includes("想到有关死亡的事") && block.text.includes("12356")) return true;
+  return false;
+}
+
+function readCrisisValue(value) {
+  if (typeof value === "string") {
+    const body = text(value);
+    return body ? { level: "", title: "", text: body } : null;
+  }
+  const obj = asObj(value);
+  if (!obj) return null;
+  const body = text(obj.text) || text(obj.message) || text(obj.body);
+  if (!body) return null;
+  const level = text(obj.level).toLowerCase();
+  return {
+    level: level === "urgent" || level === "alert" || level === "note" ? level : "",
+    title: text(obj.title),
+    text: body,
+  };
+}
+
+function crisisFromAnswers(answers) {
+  if (!Array.isArray(answers) || answers.length !== 90) return null;
+  const wish = answers[14];
+  const deathThought = answers[58];
+  const valid = (value) => Number.isInteger(value) && value >= 1 && value <= 5;
+  if (wish != null && !valid(wish)) return null;
+  if (deathThought != null && !valid(deathThought)) return null;
+  if (valid(wish) && wish >= 4) return { level: "urgent", title: "", text: SCL_CRISIS.urgent };
+  if (valid(wish) && wish >= 2) return { level: "alert", title: "", text: SCL_CRISIS.alert };
+  if (valid(deathThought) && deathThought >= 4) return { level: "note", title: "", text: SCL_CRISIS.note };
+  return null;
+}
+
+function flagCrisisLevel(flags) {
+  if (flags.includes("crisis-urgent")) return "urgent";
+  if (flags.includes("crisis-alert")) return "alert";
+  if (flags.includes("crisis-note")) return "note";
+  return "";
+}
+
+function readCrisis(report, pack, flags) {
+  let sawStructured = false;
+  let structured = null;
+  for (const obj of [pack.viewModel, pack.viewScore, pack.score, pack.result, pack.extension]) {
+    if (!owns(obj, "crisis")) continue;
+    sawStructured = true;
+    structured = readCrisisValue(obj.crisis);
+    break;
+  }
+  const blocks = blocksOf(report.interpretation).concat(blocksOf(report.recommendations));
+  const block = blocks.find(isCrisisBlock);
+  let crisis = structured || (block ? { level: "", title: block.title, text: block.text } : null);
+  if (!crisis && !sawStructured) crisis = crisisFromAnswers(answersOf(report, pack));
+  if (!crisis) return null;
+  const flagged = flagCrisisLevel(flags);
+  if (!crisis.level && flagged) crisis.level = flagged;
+  if (!crisis.title) crisis.title = crisis.level === "note" ? "关于死亡的想法" : "请先看这里";
+  return crisis;
+}
+
+function answersOf(report, pack) {
+  if (Array.isArray(pack.viewModel.answers)) return pack.viewModel.answers;
+  if (Array.isArray(pack.extension.answers)) return pack.extension.answers;
+  if (pack.score && Array.isArray(pack.score.answers)) return pack.score.answers;
+  return null;
+}
+
+function lineList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (typeof item === "string") return text(item);
+    if (item && typeof item === "object") return text(item.text) || text(item.x);
+    return "";
+  }).filter(Boolean);
+}
+
+function readRules(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((rule) => {
+    const obj = asObj(rule);
+    if (!obj) return null;
+    const label = text(obj.label);
+    if (!label || typeof obj.hit !== "boolean") return null;
+    return { label, hit: obj.hit, detail: text(obj.detail) };
+  }).filter(Boolean);
+}
+
+function readNotable(value) {
+  if (!Array.isArray(value)) return null;
+  return value.map((item) => {
+    const obj = asObj(item);
+    if (!obj) return null;
+    const n = num(obj.n ?? obj.item);
+    const body = text(obj.text) || text(obj.question);
+    const score = num(obj.score ?? obj.value);
+    if (n == null && !body) return null;
+    return { n, text: body, score };
+  }).filter(Boolean);
+}
+
+function optionWord(score) {
+  const value = num(score);
+  if (value == null) return "";
+  return SCL_OPTIONS[value] || showTrim(value);
+}
+
+function sectionLines(report) {
+  const sections = report.reportContent && report.reportContent.sections;
+  if (!Array.isArray(sections)) return [];
+  const lines = [];
+  sections.forEach((section) => {
+    if (!section || typeof section !== "object") return;
+    const line = text(section.x) || text(section.text);
+    if (line) lines.push(line);
+    if (Array.isArray(section.it)) {
+      section.it.forEach((item) => {
+        const inner = text(item && (item.x || item.text));
+        if (inner) lines.push(inner);
+      });
+    }
+  });
+  return lines;
+}
+
+function fresh(lines, seen) {
+  const out = [];
+  lines.forEach((line) => {
+    if (!line || seen.some((item) => item === line || item.includes(line))) return;
+    out.push(line);
+    seen.push(line);
+  });
+  return out;
+}
+
+function normLine(norms) {
+  const obj = asObj(norms);
+  if (!obj) return "";
+  const total = asObj(obj.total);
+  const positive = asObj(obj.positiveCount);
+  if (!total || !positive || num(total.mean) == null || num(total.sd) == null) return "";
+  if (num(positive.mean) == null || num(positive.sd) == null) return "";
+  return `全国常模里，总分约 ${showTrim(total.mean)} ± ${showTrim(total.sd)}，阳性项目数约 ${showTrim(positive.mean)} ± ${showTrim(positive.sd)}。`;
+}
+
+function aboveLine(pack) {
+  const pairs = [
+    ["总分", pickBool([pack.viewModel, pack.viewScore, pack.score], "totalAboveNorm")],
+    ["总症状指数", pickBool([pack.viewModel, pack.viewScore, pack.score], "gsiAboveNorm")],
+    ["阳性项目数", pickBool([pack.viewModel, pack.viewScore, pack.score], "positiveCountAboveNorm")],
+    ["阳性症状均分", pickBool([pack.viewModel, pack.viewScore, pack.score], "positiveMeanAboveNorm")],
+  ];
+  const known = pairs.filter((pair) => typeof pair[1] === "boolean");
+  if (!known.length) return "";
+  const hits = known.filter((pair) => pair[1]).map((pair) => pair[0]);
+  if (hits.length) return `高于常模一个标准差的是${hits.join("、")}。`;
+  const quiet = ["总分", "总症状指数", "阳性项目数"].every((name) => known.some((pair) => pair[0] === name && pair[1] === false));
+  return quiet ? "总分、总症状指数和阳性项目数都没有超过常模一个标准差。" : "";
+}
+
+function sclBar(slot) {
+  if (slot.score == null || !(slot.max > 1)) return 0;
+  return Math.max(0, Math.min(100, ((slot.score - 1) / (slot.max - 1)) * 100));
+}
+
+function foldSclCopy(factors, blocks) {
+  const byId = new Map(factors.map((slot) => [slot.id, slot]));
+  const byName = new Map(factors.filter((slot) => slot.name).map((slot) => [slot.name, slot]));
+  const lines = [];
+  let gsiText = "";
+  let gsiLabel = "";
+  blocks.forEach((block) => {
+    if (!block || isCrisisBlock(block)) return;
+    if (block.id === "gsi") {
+      if (!gsiText) gsiText = block.text;
+      if (!gsiLabel) gsiLabel = block.title;
+      return;
+    }
+    const slot = byId.get(block.id) || byName.get(block.title);
+    if (slot) {
+      if (slot.score == null) {
+        const mean = block.text.match(/均分\s*(\d+(?:\.\d+)?)/);
+        if (mean) slot.score = Number(mean[1]);
+      }
+      if (!slot.narrative) {
+        const stripped = block.text.replace(/^[^。]*均分\s*\d+(?:\.\d+)?。/, "");
+        slot.narrative = text(stripped) || block.text;
+      }
+      return;
+    }
+    lines.push(block.title ? `${block.title}：${block.text}` : block.text);
+  });
+  return { lines, gsiText, gsiLabel };
+}
+
+function firstFilled(...lists) {
+  for (const list of lists) {
+    if (Array.isArray(list) && list.length) return list;
+  }
+  return [];
+}
+
+function readScl90(report) {
+  report = report || {};
+  const pack = sourcesOf(report);
+  const numberSources = [pack.viewModel, pack.viewScore, pack.score, pack.result];
+  const textSources = [pack.viewModel, pack.viewScore, pack.score];
+  const slots = new Map(SCL_ORDER.map((id) => [id, emptySclSlot(id)]));
+  applySclList(slots, pack.score && pack.score.factors);
+  applySclList(slots, pack.score && pack.score.ranked);
+  applySclList(slots, report.dimensions);
+  applySclList(slots, pack.viewModel.dimensions);
+  applySclList(slots, pack.viewScore && pack.viewScore.factors);
+  applySclList(slots, pack.viewModel.factors);
+  applySclList(slots, pack.viewScore && pack.viewScore.ranked);
+  applySclList(slots, pack.viewModel.ranked);
+  slots.forEach((slot) => {
+    if (!slot.level && slot.score != null) slot.level = levelFromMean(slot.score);
+    if (!slot.levelLabel && slot.level) slot.levelLabel = SCL_LEVELS[slot.level] || "";
+    if (!slot.name) slot.name = SCL_NAMES[slot.id] || slot.id;
+  });
+  const factors = orderedSlots(slots, [], []);
+  const gsi = pickState(numberSources, ["gsi"]);
+  const total = pickState(numberSources, ["total"]);
+  const positiveCount = pickState(numberSources, ["positiveCount"]);
+  const positiveMean = pickState(numberSources, ["positiveMean"]);
+  const negativeCount = pickState(numberSources, ["negativeCount"]);
+  const flags = Array.isArray(pack.result.flags) ? pack.result.flags.map((flag) => text(flag).toLowerCase()) : [];
+  const code = text(pack.result.code).toLowerCase();
+  let positive = pickBool(textSources, "positive");
+  if (positive == null && (flags.includes("positive") || code === "positive")) positive = true;
+  if (positive == null && (flags.includes("negative") || code === "negative") && code !== "positive" && !flags.includes("positive")) positive = false;
+  const verdictTitle = pickText(textSources, ["verdictTitle"])
+    || (positive === true ? "筛查阳性" : "")
+    || (positive === false ? "筛查阴性" : "");
+  const verdictText = pickText(textSources, ["verdictText"]) || text(pack.result.summary);
+  let gsiLabel = pickText(textSources, ["gsiLabel"]) || gsiLabelFrom(gsi.value);
+  let gsiText = pickText(textSources, ["gsiText"]);
+  const headline = text(pack.result.headline) || text(pack.viewModel.headline);
+  const crisis = readCrisis(report, pack, flags);
+  const profile = asObj(pack.viewModel.profile) || asObj(pack.extension.profile) || {};
+  const who = [text(profile.name), text(profile.gender), text(profile.age)].filter(Boolean).join(" · ");
+  const youth = text(profile.age) === "20岁以下"
+    ? "年龄选的是 20 岁以下。常模来自成人样本，16–19 岁只作参考，不宜直接套用成人界值做判断。"
+    : "";
+  const quality = asObj(pack.extension.quality) || {};
+  const rushed = quality.rushed === true || quality.tooFast === true
+    || pack.viewModel.rushed === true || pack.viewModel.tooFast === true
+    || (pack.score && pack.score.rushed === true)
+    || (asObj(pack.viewModel.rush) && pack.viewModel.rush.tooFast === true);
+  const rules = firstFilled(readRules(pack.viewModel.rules), readRules(pack.viewScore && pack.viewScore.rules), readRules(pack.score && pack.score.rules));
+  const notableSource = Array.isArray(pack.viewModel.notable)
+    ? pack.viewModel.notable
+    : (Array.isArray(pack.viewScore && pack.viewScore.notable) ? pack.viewScore.notable : (pack.score && pack.score.notable));
+  const notable = readNotable(notableSource);
+  const recommendationLines = blocksOf(report.recommendations)
+    .filter((block) => !isCrisisBlock(block) && !block.text.includes("阅读页还没接上") && !block.text.includes("统一阅读页目前只重绘"))
+    .map((block) => (block.title ? `${block.title}：${block.text}` : block.text));
+  const guidance = recommendationLines.length
+    ? recommendationLines
+    : firstFilled(
+      lineList(pack.viewModel.guidance),
+      lineList(pack.viewScore && pack.viewScore.guidance),
+      lineList(pack.score && pack.score.guidance),
+    );
+  const copied = foldSclCopy(factors, blocksOf(report.interpretation));
+  factors.forEach((slot) => {
+    if (!slot.level && slot.score != null) slot.level = levelFromMean(slot.score);
+    if (!slot.levelLabel && slot.level) slot.levelLabel = SCL_LEVELS[slot.level] || "";
+  });
+  if (!gsiText && copied.gsiText) gsiText = copied.gsiText;
+  if (!gsiLabel && copied.gsiLabel) gsiLabel = copied.gsiLabel;
+  const seen = [crisis && crisis.text, verdictTitle, verdictText, gsiText, headline]
+    .concat(factors.map((slot) => slot.narrative))
+    .concat(guidance)
+    .filter(Boolean);
+  const interpretation = fresh(copied.lines, seen);
+  const anyNumber = gsi.present || total.present || positiveCount.present || positiveMean.present || factors.some((slot) => slot.score != null);
+  const leftover = anyNumber ? [] : fresh(sectionLines(report), seen);
+  const prose = [verdictText, gsiText, headline].concat(interpretation, guidance, leftover).join("\n");
+  return {
+    name: text(report.assessmentName) || "SCL-90 症状自评量表",
+    factors,
+    gsi,
+    total,
+    positiveCount,
+    positiveMean,
+    negativeCount,
+    gsiLabel,
+    gsiText,
+    verdictTitle,
+    verdictText,
+    headline: headline && headline !== verdictTitle && !headline.startsWith(verdictTitle) ? headline : "",
+    crisis,
+    who,
+    youth,
+    rushed,
+    rules,
+    notable,
+    guidance,
+    interpretation,
+    leftover,
+    above: aboveLine(pack),
+    norms: normLine(pack.viewModel.norms || (pack.score && pack.score.norms)),
+    notice: prose.includes("不是诊断") ? "" : SCL_NOTICE,
+    nickname: report.nickname,
+    completedAt: report.completedAt,
+    version: report.assessmentVersion,
+    empty: !anyNumber,
+  };
+}
+
+function sclStats(model) {
+  const items = [];
+  if (model.total.present) items.push(["总分", showCount(model.total.value)]);
+  if (model.positiveCount.present) items.push(["阳性项目", showCount(model.positiveCount.value)]);
+  if (model.negativeCount.present) items.push(["阴性项目", showCount(model.negativeCount.value)]);
+  if (model.positiveMean.present) items.push(["阳性症状均分", model.positiveMean.value == null ? "—" : fixed2(model.positiveMean.value)]);
+  if (!items.length) return "";
+  return `<section class="scl-stats">${items.map(([label, value]) => `
+    <div class="scl-stat"><b>${esc(value)}</b><span>${esc(label)}</span></div>
+  `).join("")}</section>`;
+}
+
+function sclFactors(factors) {
+  return factors.map((slot) => {
+    const level = SCL_LEVELS[slot.level] ? slot.level : "";
+    const scoreClass = level ? ` scl-level-${level}` : "";
+    const fillClass = level ? ` scl-fill-${level}` : "";
+    const metaLeft = slot.about || (slot.raw != null && slot.count ? `因子总分 ${showCount(slot.raw)} / ${showCount(slot.count)} 题` : "");
+    const metaRight = [slot.levelLabel, slot.aboveNorm ? "高于常模" : ""].filter(Boolean).join(" · ");
+    const norm = slot.normMean != null && slot.normSd != null
+      ? `常模 ${showTrim(slot.normMean)} ± ${showTrim(slot.normSd)}`
+      : "";
+    const raw = slot.raw != null && slot.count && slot.about
+      ? `因子总分 ${showCount(slot.raw)} / ${showCount(slot.count)} 题`
+      : "";
+    const foot = [raw, norm].filter(Boolean).join(" · ");
+    return `
+      <article class="sefs-dim">
+        <div class="sefs-dim-head">
+          <h3>${esc(slot.name)}</h3>
+          <p class="sefs-score${scoreClass}">${esc(fixed2(slot.score))} <small>/ ${esc(showCount(slot.max))}</small></p>
+        </div>
+        <div class="sefs-track" aria-hidden="true"><div class="sefs-fill${fillClass}" style="width:${sclBar(slot).toFixed(1)}%"></div></div>
+        ${metaLeft || metaRight ? `<p class="sefs-dim-meta"><span>${esc(metaLeft)}</span><span>${esc(metaRight)}</span></p>` : ""}
+        ${foot ? `<p class="scl-foot">${esc(foot)}</p>` : ""}
+        ${slot.narrative ? `<p class="scl-narrative">${esc(slot.narrative)}</p>` : ""}
+      </article>
+    `;
+  }).join("");
+}
+
+export function renderScl90Report(report) {
+  const model = readScl90(report || {});
+  const crisis = model.crisis
+    ? `<aside class="scl-crisis ${model.crisis.level === "note" ? "scl-crisis-note" : "scl-crisis-hot"}" role="${model.crisis.level === "note" ? "note" : "alert"}">
+        <strong>${esc(model.crisis.title)}</strong>
+        <p>${esc(model.crisis.text)}</p>
+      </aside>`
+    : "";
+  const rush = model.rushed
+    ? `<p class="scl-rush"><strong>作答偏快。</strong>超过一半的题目间隔不到 1.5 秒。下面的分数仍然按作答计算，但可能没有反映最近一周的实际感觉。</p>`
+    : "";
+  const verdict = model.verdictTitle
+    ? `<p class="scl-tag${model.verdictTitle.includes("阳性") ? " scl-tag-pos" : ""}">${esc(model.verdictTitle)}</p>`
+    : "";
+  const hero = model.gsi.present
+    ? `<section class="sefs-total">
+        <p class="sefs-total-num"><strong>${esc(fixed2(model.gsi.value))}</strong></p>
+        <p class="sefs-total-label">总症状指数${model.gsiLabel ? ` · ${esc(model.gsiLabel)}` : ""}</p>
+      </section>`
+    : "";
+  const rules = model.rules.length
+    ? `<ul class="scl-rules">${model.rules.map((rule) => `
+        <li><span class="scl-pill${rule.hit ? " scl-pill-hit" : ""}">${rule.hit ? "超过" : "未超过"}</span><span><strong>${esc(rule.label)}</strong>${rule.detail ? `<br />${esc(rule.detail)}` : ""}</span></li>
+      `).join("")}</ul>`
+    : "";
+  const guidance = model.guidance.length
+    ? `<section class="sefs-insight"><h2 class="sefs-section">怎么看下一步</h2><ul class="scl-guidance">${model.guidance.map((line) => `<li>${esc(line)}</li>`).join("")}</ul></section>`
+    : "";
+  const extra = model.interpretation.concat(model.leftover);
+  const extraHtml = extra.length
+    ? `<section class="sefs-insight">${extra.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    : "";
+  let notable = "";
+  if (model.notable) {
+    notable = model.notable.length
+      ? `<details class="scl-ledger"><summary>偏重和严重的条目（${model.notable.length}）</summary><ul class="scl-symptoms">${model.notable.map((item) => `
+          <li><b>${item.n == null ? "" : esc(String(item.n).padStart(2, "0"))}</b><span>${esc(item.text)}</span><span>${esc(optionWord(item.score))}</span></li>
+        `).join("")}</ul></details>`
+      : `<p class="scl-sub">没有题目达到偏重或严重。</p>`;
+  }
+  const seenLead = new Set();
+  const takeLead = (lines) => lines.filter(Boolean).filter((line) => {
+    if (seenLead.has(line)) return false;
+    seenLead.add(line);
+    return true;
+  });
+  const before = takeLead([model.headline, model.verdictText]);
+  const after = takeLead([model.gsiText, model.above, model.norms]);
+  return `
+    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
+    <h2 class="sefs-name">${esc(model.name)}</h2>
+    <p class="sefs-kicker">最近一周的感受筛查。筛查不是诊断。</p>
+    ${model.who ? `<p class="scl-who">${esc(model.who)}</p>` : ""}
+    ${crisis}
+    ${rush}
+    ${verdict}
+    ${before.map((line) => `<p class="scl-lead">${esc(line)}</p>`).join("")}
+    ${model.youth ? `<p class="scl-sub">${esc(model.youth)}</p>` : ""}
+    ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
+    ${hero}
+    ${sclStats(model)}
+    ${after.map((line) => `<p class="scl-lead">${esc(line)}</p>`).join("")}
+    ${rules}
+    <h2 class="sefs-section">十个方面</h2>
+    <p class="scl-scale">横条左端 1 分，右端 5 分。2 分及以下为无明显症状，其后到 3 分为轻度，到 4 分为中度，再高为重度。</p>
+    <section class="sefs-dims">${sclFactors(model.factors)}</section>
+    ${guidance}
+    ${extraHtml}
+    ${notable}
+    ${model.notice ? `<p class="sefs-notice">${esc(model.notice)}</p>` : ""}
+    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+  `;
+}
+
 export function renderReport(report) {
   if (report && report.assessmentId === "star") return renderStarReport(report);
   if (report && report.assessmentId === "sefs") return renderSefsReport(report);
+  if (report && report.assessmentId === "scl90") return renderScl90Report(report);
   return `<p class="state">这份报告的阅读页还没接上。${esc(report && report.assessmentName || "")}</p>`;
 }
