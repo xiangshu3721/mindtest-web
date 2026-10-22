@@ -202,6 +202,41 @@ ol, ul { margin: 8px 0 0; padding-left: 1.2em; }
   font-size: 14px;
 }
 
+.pdq-verdict {
+  margin: 16px 0 0;
+  font-family: var(--serif);
+  font-size: clamp(22px, 5vw, 26px);
+  font-weight: 500;
+  line-height: 1.35;
+}
+.pdq-valid { margin-top: 4px; }
+.pdq-valid article { padding: 14px 0; border-top: 1px solid #e6ddd4; }
+.pdq-valid h3 { margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 500; }
+.pdq-valid p { margin: 8px 0 0; }
+.pdq-flag { margin: 6px 0 0; color: #1d6a3a; font-size: 13px; letter-spacing: 0.04em; }
+.pdq-flag-on { color: #9b5b3c; }
+.pdq-cluster h2 { margin-top: 22px; font-size: 22px; }
+.pdq-cluster h3 { min-width: 0; }
+.pdq-alias { color: var(--muted); font-weight: 400; }
+.pdq-hit .sefs-score { color: #8d2f2a; }
+.pdq-fill { background: #6d8f86; }
+.pdq-hit .pdq-fill { background: #b15a34; }
+.pdq-track { overflow: visible; }
+.pdq-cut {
+  position: absolute;
+  top: -3px;
+  width: 1.5px;
+  height: 14px;
+  background: var(--ink);
+  pointer-events: none;
+}
+.pdq-portrait {
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  border-radius: 6px 16px;
+  background: #f6efe4;
+}
+
 @media (max-width: 640px) {
   .sheet { padding: 24px 16px; }
   .roster { grid-template-columns: 1fr; }

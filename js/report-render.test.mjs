@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { WORDS } from "../star/js/data.js";
 import { buildStarResult } from "../star/js/cloud-payload.js";
+import { SCALES, TOO_GOOD_REVERSE } from "../pdq/js/data.js";
+import { scorePdq4 } from "../pdq/js/score.js";
 import { FACTORS } from "../scl90/js/data.js";
 import { scoreScl90 } from "../scl90/js/score.js";
 import { renderReport } from "./report-render.js";
@@ -48,8 +50,8 @@ test("旧的六芒星报告仍然可读", () => {
 });
 
 test("其他测评仍提示阅读页还没接上", () => {
-  const html = renderReport({ assessmentId: "pdq4", assessmentName: "人格障碍筛查" });
-  assert.equal(html.includes("这份报告的阅读页还没接上。人格障碍筛查"), true);
+  const html = renderReport({ assessmentId: "ecr", assessmentName: "成人依恋" });
+  assert.equal(html.includes("这份报告的阅读页还没接上。成人依恋"), true);
   assert.equal(renderReport(null).includes("这份报告的阅读页还没接上。"), true);
 });
 
@@ -647,4 +649,295 @@ test("SCL-90 只有 interpretation 里的危机和因子句时也能读", () => 
   assert.equal(html.split("低落已经比较稳定。").length - 1, 1);
   assert.equal(html.includes("均分 3.20。"), false);
   assert.equal(html.includes("3.20 <small>/ 5</small>"), true);
+});
+
+const PDQ_NAMES = ["偏执型", "分裂样", "分裂型", "反社会型", "边缘型", "表演型", "自恋型", "回避型", "依赖型", "强迫型", "被动攻击型", "抑郁型"];
+
+function pdqBlank() {
+  return Array(126).fill(0);
+}
+
+function pdqHonest() {
+  const answers = pdqBlank();
+  TOO_GOOD_REVERSE.forEach((n) => {
+    answers[n - 1] = 1;
+  });
+  return answers;
+}
+
+function pdqMark(answers, items) {
+  items.forEach((n) => {
+    answers[n - 1] = 1;
+  });
+  return answers;
+}
+
+function pdqProtocol(answers, extra = {}) {
+  const scored = scorePdq4(answers);
+  const scales = scored.scales.map((scale) => ({
+    id: scale.id,
+    name: scale.name,
+    alias: scale.alias,
+    cluster: scale.cluster,
+    about: scale.about,
+    portrait: scale.portrait,
+    score: scale.score,
+    max: scale.max,
+    cutoff: scale.cutoff,
+    positive: scale.positive,
+  }));
+  return {
+    scored,
+    report: {
+      assessmentId: "pdq4",
+      assessmentName: "PDQ-4 人格障碍筛查",
+      assessmentVersion: "pdq4-h5-v1",
+      nickname: extra.nickname || "阿禾",
+      completedAt: when,
+      dimensions: scales.map((scale) => ({
+        id: scale.id,
+        name: scale.name,
+        kind: "score",
+        score: 0,
+        max: scale.max,
+        level: "clear",
+        levelLabel: "未达到",
+        narrative: "不该出现的维度旧句",
+        labels: [],
+      })),
+      result: {
+        headline: "不该用结果标题",
+        code: "clear",
+        label: "筛查不是诊断",
+        summary: "不该用结果正文",
+        flags: [],
+      },
+      interpretation: scored.positiveScales.map((scale) => ({
+        id: scale.id,
+        title: scale.name,
+        text: scale.portrait,
+      })),
+      recommendations: [
+        { id: "reader", text: "统一阅读页目前只重绘职业六芒星，PDQ-4 的阅读页会另开任务。" },
+        { id: "note", title: "可以放一放", text: "分数只是这次问卷的筛查标记。" },
+      ],
+      reportContent: {
+        format: "view-model+sections",
+        viewModel: {
+          scales,
+          positiveCount: scored.positiveCount,
+          total: scored.total,
+          tooGood: scored.tooGood,
+          suspect: scored.suspect,
+          impulse: scored.impulse,
+          conduct: scored.conduct,
+          verdict: scored.verdict,
+          clusters: [
+            { id: "A", name: "A 群", note: "疏离、猜疑或古怪" },
+            { id: "B", name: "B 群", note: "情绪强烈、人际动荡" },
+            { id: "C", name: "C 群", note: "焦虑、依赖或过度控制" },
+            { id: "X", name: "附录", note: "DSM-IV 建议进一步观察的类型" },
+          ],
+          rushed: Boolean(extra.rushed),
+        },
+      },
+      extensionData: {
+        answers: Array(126).fill(1),
+        score: {
+          ...scored,
+          total: 999,
+          positiveCount: 11,
+          scales: scored.scales.map((scale) => ({ ...scale, score: 0, positive: false, portrait: "不该出现的画像" })),
+          tooGood: { score: 0, max: 4, cutoff: 2, flagged: false, items: [] },
+          suspect: { score: 9, max: 2, cutoff: 1, flagged: true, items: [99] },
+          impulse: { count: 9, need: 2, point: 0 },
+          conduct: { count: 9, need: 3, point: 0 },
+          verdict: { id: "clear", title: "不该用的标题", text: "不该用的正文" },
+        },
+        quality: { rushed: false },
+      },
+    },
+  };
+}
+
+test("PDQ-4 协议对象画出十二量表、效度和分群，viewModel 盖过旧分", () => {
+  const answers = pdqHonest();
+  const par = SCALES.find((scale) => scale.id === "par");
+  const bor = SCALES.find((scale) => scale.id === "bor");
+  pdqMark(answers, par.items.slice(0, par.cutoff));
+  pdqMark(answers, bor.items.slice(0, bor.cutoff));
+  const { scored, report } = pdqProtocol(answers);
+  const html = renderReport(report);
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("PDQ-4 人格障碍筛查"), true);
+  assert.equal(html.includes("筛查不是诊断"), true);
+  assert.equal(html.includes(scored.verdict.title), true);
+  assert.equal(html.includes(scored.verdict.text), true);
+  assert.equal(html.includes("不该用的标题"), false);
+  assert.equal(html.includes("不该用的正文"), false);
+  assert.equal(html.includes("不该用结果标题"), false);
+  assert.equal(html.includes("不该出现的画像"), false);
+  assert.equal(html.includes("不该出现的维度旧句"), false);
+  assert.equal(html.includes("统一阅读页目前只重绘"), false);
+  assert.equal(html.includes("分数只是这次问卷的筛查标记。"), true);
+  assert.equal(html.includes(`<b>${scored.positiveCount}</b><span>达到划界</span>`), true);
+  assert.equal(html.includes(`<b>${scored.total}</b><span>十二维合计</span>`), true);
+  assert.equal(html.includes("<b>999</b>"), false);
+  assert.equal(html.includes("<b>11</b>"), false);
+  assert.equal(html.includes("合计把第 60 题算了两次"), true);
+  assert.equal(html.split("pdq-hit").length - 1, scored.positiveCount);
+  for (let i = 1; i < PDQ_NAMES.length; i += 1) {
+    assert.equal(html.indexOf(`<h3>${PDQ_NAMES[i - 1]}`) < html.indexOf(`<h3>${PDQ_NAMES[i]}`), true, PDQ_NAMES[i]);
+  }
+  assert.equal(html.indexOf("A 群") < html.indexOf("B 群"), true);
+  assert.equal(html.indexOf("B 群") < html.indexOf("C 群"), true);
+  assert.equal(html.indexOf("C 群") < html.indexOf("附录"), true);
+  assert.equal(html.includes("疏离、猜疑或古怪"), true);
+  assert.equal(html.includes("癔症型"), true);
+  const parScore = scored.scales.find((scale) => scale.id === "par");
+  const borScore = scored.scales.find((scale) => scale.id === "bor");
+  assert.equal(html.includes(`${parScore.score} <small>/ ${parScore.max}</small>`), true);
+  assert.equal(html.includes(`${borScore.score} <small>/ ${borScore.max}</small>`), true);
+  assert.equal(html.split(parScore.portrait).length - 1, 1);
+  assert.equal(html.split(borScore.portrait).length - 1, 1);
+  const quiet = scored.scales.find((scale) => scale.id === "szd");
+  assert.equal(html.includes(quiet.portrait), false);
+  assert.equal(html.includes(quiet.about), true);
+  assert.equal(html.includes(`<h3>掩饰</h3>`), true);
+  assert.equal(html.includes(`<h3>怀疑</h3>`), true);
+  assert.equal(html.includes(`${scored.tooGood.score} <small>/ ${scored.tooGood.max}</small>`), true);
+  assert.equal(html.includes(`${scored.suspect.score} <small>/ ${scored.suspect.max}</small>`), true);
+  assert.equal(html.includes("未触发"), true);
+  assert.equal(html.includes("记分题号：99"), false);
+  assert.equal(html.includes("pdq4-h5-v1"), true);
+  assert.equal(html.includes("阿禾"), true);
+  assert.equal(html.includes("2026年10月22日"), true);
+  assert.equal(html.includes("作答偏快"), false);
+});
+
+test("PDQ-4 全否时掩饰可读，十二个量表都不标成阳性", () => {
+  const { scored, report } = pdqProtocol(pdqBlank());
+  const html = renderReport(report);
+  assert.equal(scored.verdict.id, "too-good-clear");
+  assert.equal(scored.tooGood.flagged, true);
+  assert.equal(scored.suspect.flagged, false);
+  assert.equal(html.includes(scored.verdict.title), true);
+  assert.equal(html.includes("需要留意"), true);
+  assert.equal(html.includes("未触发"), true);
+  assert.equal(html.includes("pdq-hit"), false);
+  assert.equal(html.includes(`${scored.tooGood.score} <small>/ ${scored.tooGood.max}</small>`), true);
+  assert.equal(html.includes("0 <small>/ 2</small>"), true);
+  assert.equal(html.includes("scl-crisis"), false);
+  assert.equal(scored.positiveScales.length, 0);
+  scored.scales.forEach((scale) => {
+    assert.equal(html.includes(scale.portrait), false, scale.id);
+  });
+});
+
+test("PDQ-4 没有 viewModel 时退回 extensionData.score", () => {
+  const answers = pdqMark(pdqHonest(), SCALES.find((scale) => scale.id === "avo").items.slice(0, 4));
+  const scored = scorePdq4(answers);
+  const html = renderReport({
+    assessmentId: "pdq4",
+    assessmentName: "人格障碍筛查",
+    assessmentVersion: "pdq4-h5-v1",
+    nickname: "小林",
+    completedAt: when,
+    extensionData: { score: scored, quality: { rushed: true } },
+  });
+  const avo = scored.scales.find((scale) => scale.id === "avo");
+  assert.equal(html.includes("人格障碍筛查"), true);
+  assert.equal(html.includes("筛查不是诊断"), true);
+  assert.equal(html.includes(scored.verdict.title), true);
+  assert.equal(html.includes(`${avo.score} <small>/ ${avo.max}</small>`), true);
+  assert.equal(html.includes("pdq-hit"), true);
+  assert.equal(html.split(avo.portrait).length - 1, 1);
+  assert.equal(html.includes("作答偏快"), true);
+  assert.equal(html.includes(`<b>${scored.total}</b><span>十二维合计</span>`), true);
+  assert.equal(html.includes("小林"), true);
+});
+
+test("PDQ-4 缺字段时降级，不白屏，也不把空分画成 0", () => {
+  const html = renderReport({
+    assessmentId: "pdq4",
+    nickname: "阿禾",
+    completedAt: when,
+    assessmentVersion: "pdq4-h5-v1",
+    reportContent: { viewModel: { scales: null, tooGood: null, suspect: null, verdict: null } },
+  });
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("这份结果里没有可显示的分数。"), true);
+  assert.equal(html.includes("筛查不是诊断"), true);
+  assert.equal(html.includes("PDQ-4 人格障碍筛查"), true);
+  for (const name of PDQ_NAMES) assert.equal(html.includes(`<h3>${name}`), true, name);
+  assert.equal(html.includes("<h3>掩饰</h3>"), true);
+  assert.equal(html.includes("<h3>怀疑</h3>"), true);
+  assert.equal(html.includes("— <small>/ 7</small>"), true);
+  assert.equal(html.includes("— <small>/ 4</small>"), true);
+  assert.equal(html.includes("— <small>/ 2</small>"), true);
+  assert.equal(html.includes(">0 <small>"), false);
+  assert.equal(html.includes("pdq-hit"), false);
+  assert.equal(html.includes("需要留意"), false);
+  assert.equal(html.includes("未触发"), false);
+  assert.equal(html.includes("这项效度没有随结果一起送来。"), true);
+});
+
+test("PDQ-4 只给了部分维度时仍能读，答案不会被拿来重算", () => {
+  const html = renderReport({
+    assessmentId: "pdq4",
+    assessmentName: "PDQ-4 人格障碍筛查",
+    dimensions: [
+      { id: "histrionic", name: "癔症型", score: 2, max: 8 },
+      { id: "par", name: "偏执型", score: 5, max: 7, levelLabel: "达到划界" },
+    ],
+    extensionData: { answers: Array(126).fill(1), score: { total: 94, positiveCount: 12 } },
+    reportContent: { viewModel: { total: 5, positiveCount: 1 } },
+  });
+  assert.equal(html.includes("5 <small>/ 7</small>"), true);
+  assert.equal(html.includes("2 <small>/ 8</small>"), true);
+  assert.equal(html.includes("表演型"), true);
+  assert.equal(html.includes("癔症型"), true);
+  assert.equal(html.includes("pdq-hit"), true);
+  assert.equal(html.includes("达到划界的是偏执型。"), true);
+  assert.equal(html.includes("<b>1</b><span>达到划界</span>"), true);
+  assert.equal(html.includes("<b>5</b><span>十二维合计</span>"), true);
+  assert.equal(html.includes("<b>94</b>"), false);
+  assert.equal(html.includes("<b>12</b>"), false);
+  assert.equal(html.includes("边缘型</h3>"), true);
+  assert.equal(html.includes("未达到"), true);
+});
+
+test("PDQ-4 掩饰和怀疑同时标记时平实可读，并转义昵称和画像", () => {
+  const html = renderReport({
+    assessmentId: "pdq4",
+    assessmentName: "<img src=x onerror=alert(1)>",
+    nickname: "<script>alert(1)</script>",
+    completedAt: when,
+    result: { code: "invalid" },
+    reportContent: {
+      viewModel: {
+        positiveCount: 1,
+        total: 4,
+        verdict: { id: "invalid", title: "<b>作答本身先要打折</b>", text: "有题目提示问卷可疑，同时也有掩饰倾向。" },
+        tooGood: { score: 2, max: 4, cutoff: 2, flagged: true, items: [12, 25] },
+        suspect: { score: 1, max: 2, cutoff: 1, flagged: true, items: [64] },
+        impulse: { count: 2, need: 2, point: 1 },
+        conduct: { count: 0, need: 3, point: 0 },
+        scales: [{ id: "bor", score: 5, max: 9, cutoff: 5, positive: true, portrait: "<script>alert(1)</script>" }],
+      },
+    },
+  });
+  assert.equal(html.includes("<script>"), false);
+  assert.equal(html.includes("<img"), false);
+  assert.equal(html.includes("<b>作答"), false);
+  assert.equal(html.includes("&lt;script&gt;"), true);
+  assert.equal(html.includes("作答本身先要打折"), true);
+  assert.equal(html.includes("scl-crisis"), false);
+  assert.equal(html.split("需要留意").length - 1, 2);
+  assert.equal(html.includes("记分题号：12、25。"), true);
+  assert.equal(html.includes("记分题号：64。"), true);
+  assert.equal(html.includes("pdq-portrait"), true);
+  assert.equal(html.includes("合成 1 分，记在边缘型。"), true);
+  assert.equal(html.includes("合成 0 分，记在反社会型。"), true);
+  assert.equal(html.includes("筛查不是诊断"), true);
 });
