@@ -115,14 +115,14 @@ test("结果页自动提交，只留下分享结果", async () => {
   await flush();
   assert.equal(calls.length, 1);
   assert.equal(again.result.reportId, calls[0].body.result.reportId);
-  assert.match(again.linkSecret, /^[A-Za-z0-9_-]{22}$/);
-  assert.match(again.result.reportId, /^rpt_[A-Za-z0-9_-]{16}$/);
+  assert.match(again.linkSecret, /^[A-Za-z0-9_-]{16}$/);
+  assert.match(again.result.reportId, /^rpt_[A-Za-z0-9_-]{11}$/);
 
   slot.click("share");
   await flush();
-  assert.match(copied, /^https:\/\/xiangshu3721\.github\.io\/mindtest-web\/r\/#[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}$/);
+  assert.match(copied, /^https:\/\/xiangshu3721\.github\.io\/mindtest-web\/r\/#[A-Za-z0-9_-]{11}\.[A-Za-z0-9_-]{16}$/);
   assert.equal(copied.includes("rpt_"), false);
-  assert.ok(copied.length <= 90);
+  assert.equal(copied.length, 75);
   assert.match(slot.innerHTML, /链接已复制/);
   const saved = createCloudStore(globalThis.localStorage).links();
   assert.equal(Object.values(saved)[0].reportUrl, copied);

@@ -2,8 +2,8 @@ export const PENDING_KEY = "rk.cloud.pending.v1";
 export const OWNER_KEY = "rk.cloud.owner.v1";
 export const LINKS_KEY = "rk.cloud.links.v1";
 
-const REPORT_RE = /^rpt_[A-Za-z0-9_-]{16,64}$/;
-const SECRET_RE = /^[A-Za-z0-9_-]{22,128}$/;
+const REPORT_RE = /^rpt_[A-Za-z0-9_-]{11,64}$/;
+const SECRET_RE = /^[A-Za-z0-9_-]{16,128}$/;
 
 export function randomToken(bytes = 32, cryptoObj = globalThis.crypto) {
   const list = new Uint8Array(bytes);
@@ -13,10 +13,10 @@ export function randomToken(bytes = 32, cryptoObj = globalThis.crypto) {
 
 export function createSubmissionIds(cryptoObj) {
   return {
-    // 12 字节是 16 个字符，16 字节是 22 个字符。这是已上线函数允许的最短长度。
-    reportId: `rpt_${randomToken(12, cryptoObj)}`,
+    // 8 字节编号是 11 个字符，12 字节秘密是 16 个字符。上限仍接受旧的长链。
+    reportId: `rpt_${randomToken(8, cryptoObj)}`,
     clientSubmissionId: `sub_${randomToken(18, cryptoObj)}`,
-    linkSecret: randomToken(16, cryptoObj),
+    linkSecret: randomToken(12, cryptoObj),
     ownerToken: randomToken(18, cryptoObj),
   };
 }
