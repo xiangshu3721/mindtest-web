@@ -1,4 +1,5 @@
 import { CULL_FIRST, CULL_SECOND, CULL_THIRD, GROUPS, KEEP, REVIVE, WORDS } from "./data.js";
+import { mountStarCloud } from "../../js/cloud-kit.js";
 
 const app = document.querySelector("#app");
 const STORAGE = "career-star-v2";
@@ -440,6 +441,7 @@ function renderResult() {
       <button class="ghost" type="button" data-action="retest">重新测试</button>
       <a class="ghost" href="../index.html">回到目录</a>
     </div>
+    <div id="star-cloud"></div>
   `);
 }
 
@@ -464,6 +466,24 @@ function render({ keepScroll = false, focusWord = "" } = {}) {
     node?.focus();
   } else if (!keepScroll) {
     app.querySelector("h1")?.focus();
+  }
+  if (state.step === "result") {
+    const slot = app.querySelector("#star-cloud");
+    if (slot) {
+      try {
+        mountStarCloud(slot, {
+          nickname: RK && RK.nick ? RK.nick.get() : "",
+          driveOrder: state.driveOrder.slice(),
+          pursueOrder: state.pursueOrder.slice(),
+          cull1: state.cull1.slice(),
+          cull2: state.cull2.slice(),
+          cull3: state.cull3.slice(),
+          revived: state.revived.slice(),
+        });
+      } catch {
+        /* 云端块失败时，原来的结果页仍然留着。 */
+      }
+    }
   }
 }
 
