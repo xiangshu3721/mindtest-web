@@ -1082,9 +1082,418 @@ export function renderScl90Report(report) {
   `;
 }
 
+// PDQ-4 阅读约定：不按 126 题重算。字段对齐即将合入的 pdq/js/cloud-payload.js（buildPdq4Result）。
+// viewModel 优先，其次 dimensions，再退到 extensionData.score（scorePdq4 的返回）。
+// 十二量表固定按 par szd szt ant bor his nar avo dep ocp pag dps，再按 A/B/C/X 群归位。
+// tooGood 是掩饰，suspect 是怀疑，impulse / conduct 是合成分，verdict 是总述。
+// 缺数字留「—」，不补 0。页眉写明筛查不是诊断。
+const PDQ_ORDER = ["par", "szd", "szt", "ant", "bor", "his", "nar", "avo", "dep", "ocp", "pag", "dps"];
+const PDQ_META = {
+  par: { name: "偏执型", cluster: "A", cutoff: 4, max: 7, about: "不信任别人，容易把中性的举动看成针对自己。" },
+  szd: { name: "分裂样", cluster: "A", cutoff: 4, max: 7, about: "主动与人保持距离，情感比较平、比较冷。" },
+  szt: { name: "分裂型", cluster: "A", cutoff: 5, max: 9, about: "想法或感受比较奇特，跟人靠近时容易紧张。" },
+  ant: { name: "反社会型", cluster: "B", cutoff: 3, max: 8, about: "漠视别人的处境和规则，行为不计后果。" },
+  bor: { name: "边缘型", cluster: "B", cutoff: 5, max: 9, about: "关系、心情和自我感都容易大起大落。" },
+  his: { name: "表演型", alias: "癔症型", cluster: "B", cutoff: 5, max: 8, about: "需要被看见，情绪外露，也容易受场面影响。" },
+  nar: { name: "自恋型", cluster: "B", cutoff: 5, max: 9, about: "需要被特别看待，受挫时容易羞耻或生气。" },
+  avo: { name: "回避型", cluster: "C", cutoff: 4, max: 7, about: "怕被否定，所以先退出可能被评价的场合。" },
+  dep: { name: "依赖型", cluster: "C", cutoff: 5, max: 8, about: "把决定和照顾交给别人，害怕独自撑住。" },
+  ocp: { name: "强迫型", cluster: "C", cutoff: 4, max: 8, about: "用细节、规则和完美来压住不确定。" },
+  pag: { name: "被动攻击型", cluster: "X", cutoff: 4, max: 7, about: "表面顺从来，实际用拖延和怨气抵抗。" },
+  dps: { name: "抑郁型", cluster: "X", cutoff: 5, max: 7, about: "长久的悲观和自我责备，不只是某一次心情不好。" },
+};
+const PDQ_ALIAS = {
+  paranoid: "par",
+  schizoid: "szd",
+  schizotypal: "szt",
+  antisocial: "ant",
+  borderline: "bor",
+  histrionic: "his",
+  narcissistic: "nar",
+  avoidant: "avo",
+  dependent: "dep",
+  obsessive: "ocp",
+  "obsessive-compulsive": "ocp",
+  "passive-aggressive": "pag",
+  passiveaggressive: "pag",
+  depressive: "dps",
+  偏执型: "par",
+  分裂样: "szd",
+  分裂型: "szt",
+  反社会型: "ant",
+  边缘型: "bor",
+  表演型: "his",
+  癔症型: "his",
+  自恋型: "nar",
+  回避型: "avo",
+  依赖型: "dep",
+  强迫型: "ocp",
+  被动攻击型: "pag",
+  抑郁型: "dps",
+};
+const PDQ_CLUSTERS = [
+  { id: "A", name: "A 群", note: "疏离、猜疑或古怪" },
+  { id: "B", name: "B 群", note: "情绪强烈、人际动荡" },
+  { id: "C", name: "C 群", note: "焦虑、依赖或过度控制" },
+  { id: "X", name: "附录", note: "DSM-IV 建议进一步观察的类型" },
+];
+const PDQ_READER_GAP = "统一阅读页目前只重绘";
+
+function pdqSlotId(raw) {
+  if (!raw || typeof raw !== "object") return "";
+  const id = text(raw.id).toLowerCase();
+  if (PDQ_ORDER.includes(id)) return id;
+  if (PDQ_ALIAS[id]) return PDQ_ALIAS[id];
+  const name = text(raw.name);
+  if (PDQ_ALIAS[name]) return PDQ_ALIAS[name];
+  return "";
+}
+
+function emptyPdqSlot(id) {
+  const meta = PDQ_META[id];
+  return {
+    id,
+    name: meta.name,
+    alias: meta.alias || "",
+    cluster: meta.cluster,
+    about: meta.about,
+    portrait: "",
+    score: null,
+    max: meta.max,
+    cutoff: meta.cutoff,
+    positive: null,
+  };
+}
+
+function explicitPositive(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.positive === "boolean") return raw.positive;
+  if (typeof raw.hit === "boolean") return raw.hit;
+  const level = text(raw.level).toLowerCase();
+  const label = `${text(raw.levelLabel)} ${level}`;
+  if (label.includes("未达到") || label.includes("未达划界") || ["negative", "clear", "below", "none"].includes(level)) return false;
+  if (label.includes("达到划界") || label.includes("筛查阳性") || ["positive", "hit", "flagged", "above"].includes(level)) return true;
+  return null;
+}
+
+function applyPdqScale(slots, raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+  const id = pdqSlotId(raw);
+  if (!id || !slots.has(id)) return;
+  const slot = slots.get(id);
+  const extra = asObj(raw.extra) || {};
+  const name = text(raw.name);
+  const canonical = PDQ_META[id].name;
+  if (name === canonical) slot.name = name;
+  else if (name && (name === slot.alias || name === "癔症型")) slot.alias = slot.alias || name;
+  else if (name) slot.name = name;
+  const alias = text(raw.alias) || text(extra.alias);
+  if (alias) slot.alias = alias;
+  const cluster = text(raw.cluster || extra.cluster).toUpperCase();
+  if (["A", "B", "C", "X"].includes(cluster)) slot.cluster = cluster;
+  const about = text(raw.about) || text(extra.about);
+  if (about) slot.about = about;
+  const portrait = text(raw.portrait) || text(raw.narrative) || text(extra.portrait) || text(extra.narrative);
+  if (portrait) slot.portrait = portrait;
+  const marked = explicitPositive(raw) == null ? explicitPositive(extra) : explicitPositive(raw);
+  if (owns(raw, "score")) {
+    slot.score = num(raw.score);
+    if (marked == null) slot.positive = null;
+  }
+  if (marked != null) slot.positive = marked;
+  const max = num(raw.max);
+  if (max != null && max > 0) slot.max = max;
+  const cutoffSource = owns(raw, "cutoff") ? raw : (owns(extra, "cutoff") ? extra : null);
+  if (cutoffSource) {
+    const cutoff = num(cutoffSource.cutoff);
+    if (cutoff != null) slot.cutoff = cutoff;
+  }
+}
+
+function applyPdqList(slots, list) {
+  if (!Array.isArray(list)) return;
+  list.forEach((item) => applyPdqScale(slots, item));
+}
+
+function applyPositiveIds(slots, list) {
+  if (!Array.isArray(list)) return;
+  list.forEach((item) => {
+    const id = typeof item === "string" ? pdqSlotId({ id: item }) : pdqSlotId(item);
+    if (item && typeof item === "object") applyPdqScale(slots, item);
+    if (!id || !slots.has(id)) return;
+    if (item && typeof item === "object" && explicitPositive(item) != null) return;
+    slots.get(id).positive = true;
+  });
+}
+
+function readBag(sources, key) {
+  for (const obj of sources) {
+    if (!owns(obj, key)) continue;
+    return { saw: true, bag: asObj(obj[key]) };
+  }
+  return { saw: false, bag: null };
+}
+
+function readValidity(sources, key, fallback) {
+  const { saw, bag } = readBag(sources, key);
+  const score = bag ? num(bag.score) : null;
+  const max = bag && num(bag.max) != null ? num(bag.max) : fallback.max;
+  const cutoff = bag && num(bag.cutoff) != null ? num(bag.cutoff) : fallback.cutoff;
+  let flagged = bag && typeof bag.flagged === "boolean" ? bag.flagged : null;
+  if (flagged == null && score != null && cutoff != null) flagged = score >= cutoff;
+  const items = bag && Array.isArray(bag.items) ? bag.items.map((item) => num(item)).filter((item) => item != null) : [];
+  const detail = bag ? (text(bag.detail) || text(bag.text) || text(bag.note)) : "";
+  return { saw, score, max, cutoff, flagged, items, detail };
+}
+
+function readComposite(sources, key) {
+  const { saw, bag } = readBag(sources, key);
+  if (!saw) return { present: false, count: null, need: null, point: null };
+  if (!bag) return { present: true, count: null, need: null, point: null };
+  return {
+    present: true,
+    count: num(bag.count),
+    need: num(bag.need),
+    point: num(bag.point != null ? bag.point : bag.score),
+  };
+}
+
+function readVerdict(sources, result) {
+  const { bag } = readBag(sources, "verdict");
+  const title = (bag && (text(bag.title) || text(bag.headline))) || text(result.headline) || "";
+  const body = (bag && (text(bag.text) || text(bag.summary))) || text(result.summary) || "";
+  const id = ((bag && text(bag.id)) || text(result.code)).toLowerCase();
+  const label = text(result.label);
+  return {
+    id,
+    title: title || (label && label !== "筛查不是诊断" ? label : ""),
+    text: body,
+  };
+}
+
+function clusterMeta(sources) {
+  const base = PDQ_CLUSTERS.map((item) => ({ ...item }));
+  for (const obj of sources) {
+    const list = obj && (obj.clusters || obj.groups);
+    if (!Array.isArray(list)) continue;
+    list.forEach((raw) => {
+      const found = base.find((item) => item.id === text(raw && raw.id).toUpperCase());
+      if (!found) return;
+      if (text(raw.name)) found.name = text(raw.name);
+      const note = text(raw.note) || text(raw.about);
+      if (note) found.note = note;
+    });
+    break;
+  }
+  return base;
+}
+
+function hitLineFor(scales, seenText) {
+  const hits = scales.filter((slot) => slot.positive === true);
+  if (!hits.length) {
+    const knownClear = scales.every((slot) => slot.positive === false);
+    if (knownClear && !seenText.includes("低于") && !seenText.includes("没有维度达到划界")) {
+      return "十二个分量表都低于各自的划界分。";
+    }
+    return "";
+  }
+  if (hits.every((slot) => seenText.includes(slot.name))) return "";
+  return `达到划界的是${hits.map((slot) => slot.name).join("、")}。`;
+}
+
+function pdqBar(slot) {
+  if (slot.score == null || !(slot.max > 0)) return 0;
+  return Math.max(0, Math.min(100, (slot.score / slot.max) * 100));
+}
+
+function pdqScaleArticle(slot) {
+  const hit = slot.positive === true;
+  const state = hit ? "达到划界" : (slot.positive === false ? "未达到" : "—");
+  const cut = slot.cutoff == null ? "" : `划界 ${showNum(slot.cutoff)} 分`;
+  const meta = [state, cut].filter(Boolean).join(" · ");
+  const cutLeft = slot.cutoff != null && slot.max > 0
+    ? Math.max(0, Math.min(100, (slot.cutoff / slot.max) * 100))
+    : null;
+  const name = slot.alias
+    ? `${esc(slot.name)}<span class="pdq-alias"> · ${esc(slot.alias)}</span>`
+    : esc(slot.name);
+  return `
+    <article class="sefs-dim${hit ? " pdq-hit" : ""}">
+      <div class="sefs-dim-head">
+        <h3>${name}</h3>
+        <p class="sefs-score">${esc(showNum(slot.score))} <small>/ ${esc(showNum(slot.max))}</small></p>
+      </div>
+      <div class="sefs-track pdq-track" aria-hidden="true">
+        <div class="sefs-fill pdq-fill" style="width:${pdqBar(slot).toFixed(1)}%"></div>
+        ${cutLeft == null ? "" : `<i class="pdq-cut" style="left:${cutLeft.toFixed(1)}%"></i>`}
+      </div>
+      <p class="sefs-dim-meta"><span>${esc(slot.about)}</span><span>${esc(meta)}</span></p>
+      ${hit && slot.portrait ? `<p class="pdq-portrait">${esc(slot.portrait)}</p>` : ""}
+    </article>
+  `;
+}
+
+function validityArticle(label, block, calm, caution) {
+  const mark = block.flagged == null ? "—" : (block.flagged ? "需要留意" : "未触发");
+  const detail = block.detail || (block.flagged == null ? "这项效度没有随结果一起送来。" : (block.flagged ? caution : calm));
+  const items = block.items.length && !detail.includes("题号") ? `记分题号：${block.items.join("、")}。` : "";
+  return `
+    <article class="${block.flagged ? "pdq-valid-on" : ""}">
+      <div class="sefs-dim-head">
+        <h3>${esc(label)}</h3>
+        <p class="sefs-score">${esc(showNum(block.score))} <small>/ ${esc(showNum(block.max))}</small></p>
+      </div>
+      <p class="pdq-flag${block.flagged ? " pdq-flag-on" : ""}">${esc(mark)}</p>
+      <p>${esc(detail)}${items ? ` ${esc(items)}` : ""}</p>
+    </article>
+  `;
+}
+
+function compositeLine(name, block, host) {
+  if (!block.present) return "";
+  const need = block.need == null ? "" : `至少 ${showNum(block.need)} 个「是」才记 1 分。`;
+  return `${name}：${showNum(block.count)} 个「是」，合成 ${showNum(block.point)} 分，记在${host}。${need}`;
+}
+
+function readPdq4(report) {
+  report = report || {};
+  const pack = sourcesOf(report);
+  const objectSources = [pack.viewModel, pack.viewScore, pack.score];
+  const slots = new Map(PDQ_ORDER.map((id) => [id, emptyPdqSlot(id)]));
+  applyPdqList(slots, pack.score && pack.score.scales);
+  applyPositiveIds(slots, pack.score && pack.score.positiveScales);
+  applyPdqList(slots, report.dimensions);
+  applyPdqList(slots, pack.viewModel.dimensions);
+  applyPdqList(slots, pack.viewScore && pack.viewScore.scales);
+  applyPdqList(slots, pack.viewModel.scales);
+  applyPositiveIds(slots, pack.viewModel.positiveScales);
+  slots.forEach((slot) => {
+    if (slot.positive == null && slot.score != null && slot.cutoff != null) slot.positive = slot.score >= slot.cutoff;
+  });
+  const scales = PDQ_ORDER.map((id) => slots.get(id));
+  const flags = Array.isArray(pack.result.flags) ? pack.result.flags.map((flag) => text(flag).toLowerCase()) : [];
+  const tooGood = readValidity(objectSources, "tooGood", { max: 4, cutoff: 2 });
+  const suspect = readValidity(objectSources, "suspect", { max: 2, cutoff: 1 });
+  const verdict = readVerdict(objectSources, pack.result);
+  if (tooGood.flagged == null && (flags.includes("too-good") || flags.includes("toogood") || flags.includes("too_good") || verdict.id === "too-good" || verdict.id === "too-good-clear" || verdict.id === "invalid")) {
+    tooGood.flagged = true;
+  }
+  if (suspect.flagged == null && (flags.includes("suspect") || verdict.id === "suspect" || verdict.id === "invalid")) {
+    suspect.flagged = true;
+  }
+  const countState = pickState([pack.viewModel, pack.viewScore, pack.score, pack.result], ["positiveCount"]);
+  let positiveCount = countState.present ? countState.value : null;
+  if (positiveCount == null && scales.every((slot) => typeof slot.positive === "boolean")) {
+    positiveCount = scales.filter((slot) => slot.positive).length;
+  }
+  const total = pickState([pack.viewModel, pack.viewScore, pack.score, pack.result], ["total"]);
+  const impulse = readComposite(objectSources, "impulse");
+  const conduct = readComposite(objectSources, "conduct");
+  const blocks = blocksOf(report.interpretation);
+  blocks.forEach((block) => {
+    const id = pdqSlotId({ id: block.id, name: block.title });
+    const slot = id ? slots.get(id) : null;
+    if (!slot || !slot.positive) return;
+    if (!slot.portrait) slot.portrait = block.text;
+    if (slot.portrait === block.text || slot.portrait.includes(block.text)) block.used = true;
+  });
+  const seenText = `${verdict.title}\n${verdict.text}`;
+  const hitLine = hitLineFor(scales, seenText);
+  const quality = asObj(pack.extension.quality) || {};
+  const rushed = quality.rushed === true || quality.tooFast === true
+    || pack.viewModel.rushed === true || pack.viewModel.tooFast === true
+    || (pack.score && pack.score.rushed === true);
+  const guidance = blocksOf(report.recommendations)
+    .filter((block) => !block.text.includes("阅读页还没接上") && !block.text.includes(PDQ_READER_GAP))
+    .map((block) => (block.title ? `${block.title}：${block.text}` : block.text));
+  const seen = [verdict.title, verdict.text, hitLine].concat(scales.map((slot) => slot.portrait), guidance).filter(Boolean);
+  const interpretation = fresh(blocks.filter((block) => !block.used).map((block) => (block.title ? `${block.title}：${block.text}` : block.text)), seen);
+  const anyNumber = scales.some((slot) => slot.score != null)
+    || total.present
+    || countState.present
+    || tooGood.score != null
+    || suspect.score != null
+    || impulse.present
+    || conduct.present;
+  return {
+    name: text(report.assessmentName) || "PDQ-4 人格障碍筛查",
+    scales,
+    clusters: clusterMeta(objectSources),
+    tooGood,
+    suspect,
+    verdict,
+    hitLine,
+    positiveCount,
+    total,
+    impulse,
+    conduct,
+    rushed,
+    guidance,
+    interpretation,
+    empty: !anyNumber,
+    nickname: report.nickname,
+    completedAt: report.completedAt,
+    version: report.assessmentVersion,
+  };
+}
+
+export function renderPdq4Report(report) {
+  const model = readPdq4(report || {});
+  const scalesByCluster = (id) => model.scales.filter((slot) => slot.cluster === id).map(pdqScaleArticle).join("");
+  const clusters = model.clusters.map((cluster) => {
+    const body = scalesByCluster(cluster.id);
+    if (!body) return "";
+    return `
+      <section class="pdq-cluster">
+        <h2>${esc(cluster.name)}</h2>
+        <p class="scl-sub">${esc(cluster.note)}</p>
+        <div class="sefs-dims">${body}</div>
+      </section>
+    `;
+  }).join("");
+  const totalNote = model.total.present && model.total.value != null
+    ? "合计把第 60 题算了两次。要看的是每个维度自己的划界，不是这一个总数。"
+    : "";
+  const notes = [compositeLine("边缘型的冲动题", model.impulse, "边缘型"), compositeLine("反社会型的早年行为", model.conduct, "反社会型")]
+    .filter(Boolean);
+  const guidance = model.guidance.length
+    ? `<section class="sefs-insight"><ul class="scl-guidance">${model.guidance.map((line) => `<li>${esc(line)}</li>`).join("")}</ul></section>`
+    : "";
+  const extra = model.interpretation.length
+    ? `<section class="sefs-insight">${model.interpretation.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    : "";
+  return `
+    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
+    <h2 class="sefs-name">${esc(model.name)}</h2>
+    <p class="sefs-kicker">筛查不是诊断。达到划界只说明值得再了解，不能代替面谈。</p>
+    ${model.verdict.title ? `<h3 class="pdq-verdict">${esc(model.verdict.title)}</h3>` : ""}
+    ${model.verdict.text ? `<p class="scl-lead">${esc(model.verdict.text)}</p>` : ""}
+    ${model.hitLine ? `<p class="scl-lead">${esc(model.hitLine)}</p>` : ""}
+    ${model.rushed ? `<p class="scl-rush"><strong>作答偏快。</strong>超过一半的间隔不到 1.5 秒，分数仍按选择计算。</p>` : ""}
+    ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
+    <section class="scl-stats">
+      <div class="scl-stat"><b>${esc(showNum(model.positiveCount))}</b><span>达到划界</span></div>
+      <div class="scl-stat"><b>${esc(showNum(model.total.present ? model.total.value : null))}</b><span>十二维合计</span></div>
+    </section>
+    ${totalNote ? `<p class="scl-sub">${esc(totalNote)}</p>` : ""}
+    <h2 class="sefs-section">作答效度</h2>
+    <p class="scl-sub">掩饰和怀疑不计入十二个维度。先看这里，再看分量表。</p>
+    <section class="pdq-valid">
+      ${validityArticle("掩饰", model.tooGood, "没有达到掩饰划界。第 12、25、38 题答「否」，或第 51 题答「是」，才会记入这一项。", "有几道几乎人人都会承认的小题被否认了，回答可能偏完美。分数仍然列出，卷面可能比实际更轻。")}
+      ${validityArticle("怀疑", model.suspect, "第 64 题和第 76 题都没有答「是」，这次没有按可疑处理。", "有题目提示这份问卷可疑。分数照常列出，请先看效度，再决定要不要把它们当作参考。")}
+    </section>
+    ${clusters}
+    ${notes.length ? `<section class="sefs-insight">${notes.map((line) => `<p class="scl-sub">${esc(line)}</p>`).join("")}</section>` : ""}
+    ${guidance}
+    ${extra}
+    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+  `;
+}
+
 export function renderReport(report) {
   if (report && report.assessmentId === "star") return renderStarReport(report);
   if (report && report.assessmentId === "sefs") return renderSefsReport(report);
   if (report && report.assessmentId === "scl90") return renderScl90Report(report);
+  if (report && report.assessmentId === "pdq4") return renderPdq4Report(report);
   return `<p class="state">这份报告的阅读页还没接上。${esc(report && report.assessmentName || "")}</p>`;
 }
