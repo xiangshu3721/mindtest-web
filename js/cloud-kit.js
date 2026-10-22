@@ -13,23 +13,25 @@ import {
 import { buildStarResult } from "../star/js/cloud-payload.js";
 
 const STYLE = `
-.sc-panel{margin-top:28px;padding:16px 16px 18px;border:1px solid rgba(36,28,24,.14);border-radius:6px 18px 6px 18px;background:#fffaf7;color:#241c18;font-family:"PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Microsoft YaHei",sans-serif;line-height:1.6}
-.sc-panel h2{margin:0 0 8px;font-family:"Songti SC","STSong","Noto Serif SC",serif;font-size:22px;font-weight:500}
-.sc-panel p{margin:0 0 10px;font-size:14px;color:#4e433d}
-.sc-check{display:flex;gap:8px;align-items:flex-start;margin:8px 0 12px;font-size:15px}
-.sc-check input{margin-top:4px}
-.sc-actions{display:flex;flex-wrap:wrap;gap:8px}
-.sc-btn{appearance:none;border:1px solid #241c18;background:transparent;color:#241c18;font:inherit;font-size:15px;min-height:44px;padding:8px 14px;border-radius:999px;cursor:pointer}
-.sc-btn.primary{background:#2f5d4a;border-color:#2f5d4a;color:#fff}
-.sc-btn:disabled{opacity:.45;cursor:default}
-.sc-link{width:100%;margin:8px 0;padding:8px 10px;border:1px solid rgba(36,28,24,.18);border-radius:8px;font:12px/1.4 ui-monospace,monospace;color:#241c18;background:#fff}
-.sc-warn{color:#9b5b3c}
+.sc-share{margin-top:18px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
+.sc-btn{appearance:none;border:none;background:#8a4b12;color:#fffaf7;font:inherit;font-size:16px;min-height:48px;padding:10px 18px;border-radius:999px;cursor:pointer;flex:1 1 100%}
+.sc-btn:hover{background:#6f3c0e}
+.sc-btn:focus-visible{outline:3px solid #ef9b28;outline-offset:2px}
+.sc-btn[aria-busy="true"]{opacity:.72}
+.sc-retry{appearance:none;border:none;background:transparent;color:#8a4b12;font:inherit;font-size:15px;min-height:44px;padding:8px 2px;text-decoration:underline;cursor:pointer}
+.sc-note{flex:1 1 100%;margin:0;font-size:14px;line-height:1.5;color:#4e433d}
+.sc-note.warn{color:#9b5b3c}
+@media (min-width:640px){
+  .sc-btn{flex:0 0 auto;min-width:148px}
+  .sc-note{flex:1 1 auto}
+}
 `;
 
 let styled = false;
 let current = null;
 let slotEl = null;
 let timer = 0;
+let copyTimer = 0;
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -54,152 +56,153 @@ function paint() {
   slotEl.innerHTML = view(current);
 }
 
-function indexNote(index) {
-  if (index === "已同步") return "飞书镜像已记下这条短索引。完整结果不在飞书里。";
-  if (index === "待重试" || index === "失败") return "报告已经在云端。飞书镜像还没写上，链接仍然可以用。不能用飞书里有没有这一行来判断报告丢了没有。";
-  return "飞书写入默认关着，这一轮没有写入飞书。";
+function activeSaved(key) {
+  const saved = store().links()[key];
+  if (!saved || saved.status !== "active" || !saved.reportUrl) return null;
+  return saved;
+}
+
+function pendingItem(key) {
+  return store().pending().find((item) => item.orderKey === key) || null;
+}
+
+function still(generation, key) {
+  return Boolean(current && current.generation === generation && current.orderKey === key);
 }
 
 function view(input) {
-  const key = orderKey(input.driveOrder, input.pursueOrder);
-  const saved = store().links()[key];
-  const pending = store().pending().find((item) => item.orderKey === key);
-  const agreed = Boolean(input.agreed);
-  if (saved && saved.status === "revoked") {
-    return panel(`<p>这条链接已经失效。结果还在这台设备上。</p>`);
-  }
-  if (saved && saved.status === "active") {
-    return panel(`
-      <p>报告链接已经生成。${esc(indexNote(saved.index))}</p>
-      <input class="sc-link" readonly value="${esc(saved.reportUrl)}" />
-      <div class="sc-actions">
-        <button class="sc-btn primary" type="button" data-cloud="copy">复制链接</button>
-        <button class="sc-btn" type="button" data-cloud="revoke">使链接失效</button>
-      </div>
-    `);
-  }
-  const disabled = agreed && input.nickname ? "" : "disabled";
-  const pendingNote = pending
-    ? `<p class="sc-warn">链接还没生成，结果仍在这台设备上。${esc(pending.lastError || "")}</p>`
-    : (input.note ? `<p class="sc-warn">${esc(input.note)}</p>` : "");
-  return panel(`
-    <p>勾选后，才会把这一次的两组词、页面上的说明和昵称保存到腾讯云报告库，并生成一条换设备也能打开的链接。不保存手机号，不注册账号。不勾选的话，结果只留在这台设备，和现在一样。</p>
-    <p>拿到链接的人能看完整结果。这台设备上可以让链接失效；清掉浏览器数据后，需要联系管理员。生成链接前，一份副本会暂存在这台设备。</p>
-    ${pendingNote}
-    <label class="sc-check"><input type="checkbox" data-cloud="consent" ${agreed ? "checked" : ""} />我同意保存这一次结果，并生成可转发的链接</label>
-    <div class="sc-actions">
-      <button class="sc-btn primary" type="button" data-cloud="save" ${disabled}>${pending ? "再试一次" : "生成报告链接"}</button>
-      ${pending ? `<button class="sc-btn" type="button" data-cloud="drop">放弃上云</button>` : ""}
+  const saved = activeSaved(input.orderKey);
+  const pending = pendingItem(input.orderKey);
+  const failed = Boolean(!saved && !input.saving && pending && pending.attempts > 0 && pending.lastError);
+  let note = input.note || "";
+  if (!note && input.saving && !saved) note = "链接生成中";
+  if (!note && failed) note = pending.lastError || "这次没生成链接";
+  const warn = Boolean(note && note !== "链接已复制" && note !== "链接生成中");
+  const retry = failed ? `<button class="sc-retry" type="button" data-cloud="retry">重试</button>` : "";
+  return `
+    <div class="sc-share">
+      <button class="sc-btn" type="button" data-cloud="share"${input.saving && !saved ? ' aria-busy="true"' : ""}>分享结果</button>
+      ${retry}
+      ${note ? `<p class="sc-note${warn ? " warn" : ""}">${esc(note)}</p>` : ""}
     </div>
-  `);
-}
-
-function panel(inner) {
-  return `<section class="sc-panel"><h2>保存并分享这一次</h2>${inner}</section>`;
+  `;
 }
 
 function ensureStyle() {
   if (styled || !globalThis.document) return;
   styled = true;
-  const node = document.createElement("style");
+  const node = globalThis.document.createElement("style");
   node.id = "star-cloud-style";
   node.textContent = STYLE;
-  document.head.appendChild(node);
-}
-
-function hideForDebug() {
-  const search = String((globalThis.location && globalThis.location.search) || "");
-  return /(?:^|[?&])(debug|preview)=/.test(search);
+  globalThis.document.head.appendChild(node);
 }
 
 export function mountStarCloud(slot, input) {
   ensureStyle();
   slotEl = slot;
-  if (hideForDebug()) {
-    slot.innerHTML = "";
-    return;
-  }
   const key = orderKey(input.driveOrder, input.pursueOrder);
+  const previous = current && current.orderKey === key ? current : null;
   current = {
     ...input,
-    agreed: Boolean(current && current.orderKey === key && current.agreed),
     orderKey: key,
+    saving: Boolean(previous && previous.saving),
+    note: previous ? previous.note : "",
+    generation: previous ? previous.generation : null,
   };
   if (!slot.dataset.bound) {
     slot.dataset.bound = "1";
     slot.addEventListener("click", onClick);
-    slot.addEventListener("change", onChange);
   }
   paint();
-  const pending = store().pending().find((item) => item.orderKey === key);
+  if (current.saving || activeSaved(key)) return;
+  const pending = pendingItem(key);
   if (pending && pending.attempts > 0 && pending.attempts < 8) {
-    const wait = Math.max(0, (pending.nextAt || 0) - Date.now());
-    clearTimeout(timer);
-    timer = setTimeout(() => { void submit({ auto: true }); }, wait);
+    resumePending();
+    return;
   }
-}
-
-function onChange(event) {
-  const box = event.target.closest("[data-cloud=consent]");
-  if (!box || !current) return;
-  current.agreed = box.checked;
-  paint();
+  void submit();
 }
 
 function onClick(event) {
   const button = event.target.closest("[data-cloud]");
-  if (!button) return;
+  if (!button || !current) return;
   event.stopPropagation();
   const name = button.getAttribute("data-cloud");
-  if (name === "save") void submit({ auto: false });
-  if (name === "copy") void copyLink();
-  if (name === "revoke") void revoke();
-  if (name === "drop") dropPending();
-}
-
-function dropPending() {
-  if (!current) return;
-  clearTimeout(timer);
-  const cloud = store();
-  const pending = cloud.pending().find((item) => item.orderKey === current.orderKey);
-  if (pending) cloud.removePending(pending.reportId);
-  paint();
-}
-
-async function submit({ auto }) {
-  if (!current || current.saving) return;
-  if (auto && store().links()[current.orderKey]) return;
-  const cloud = store();
-  const target = endpoint();
-  const gate = gateSubmit({ agreed: current.agreed || auto, endpoint: target, nickname: current.nickname });
-  if (!current.agreed && !auto) {
+  if (name === "retry") {
+    retry();
+    return;
+  }
+  if (name !== "share") return;
+  if (activeSaved(current.orderKey)) {
+    void copyLink();
+    return;
+  }
+  if (current.saving) {
+    current.note = "链接生成中，稍后再试";
     paint();
     return;
   }
-  if (!gate.ok && gate.reason === "endpoint") {
-    rememberError("云端报告服务还没接到这个页面。结果仍在这台设备上。");
+  retry();
+}
+
+function resumePending() {
+  if (!current || current.saving || activeSaved(current.orderKey)) return;
+  const pending = pendingItem(current.orderKey);
+  if (!pending || pending.attempts <= 0 || pending.attempts >= 8) return;
+  const wait = Math.max(0, (pending.nextAt || 0) - Date.now());
+  clearTimeout(timer);
+  timer = setTimeout(() => { void submit(); }, wait);
+}
+
+function retry() {
+  if (!current || current.saving) return;
+  clearTimeout(timer);
+  const cloud = store();
+  const pending = pendingItem(current.orderKey);
+  if (pending) {
+    pending.attempts = 0;
+    pending.lastError = "";
+    pending.nextAt = 0;
+    cloud.upsertPending(pending);
+  }
+  current.note = "";
+  void submit();
+}
+
+async function submit() {
+  if (!current || current.saving) return;
+  const key = current.orderKey;
+  if (activeSaved(key)) return;
+  const cloud = store();
+  const target = endpoint();
+  const gate = gateSubmit({ agreed: true, endpoint: target, nickname: current.nickname });
+  if (!gate.ok) {
+    rememberError(gate.reason === "nickname" ? "先填昵称，才能分享" : "现在没法生成链接");
     return;
   }
-  if (!gate.ok && gate.reason === "nickname") {
-    rememberError("先有昵称，才能保存。结果仍在这台设备上。");
-    return;
-  }
+  const generation = {};
+  current.generation = generation;
   current.saving = true;
+  current.note = "";
+  paint();
   let item = null;
   try {
-  item = ensurePending(cloud);
-  if (!item) {
-    rememberError("这一次结果不完整，没有上传。");
-    return;
-  }
+    item = ensurePending(cloud);
+    if (!still(generation, key)) return;
+    if (!item) {
+      rememberError("这一次结果不完整，没法分享");
+      return;
+    }
     const response = await fetch(`${target}/v1/results`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ result: item.payload, linkSecret: item.linkSecret, ownerToken: item.ownerToken }),
     });
+    if (!still(generation, key)) return;
     const body = await response.json().catch(() => ({}));
+    if (!still(generation, key)) return;
     if (response.status === 200 && body.reportId) {
-      rememberLink(cloud, item, body.index, body.byteSize);
+      rememberLink(cloud, item, key, generation);
       return;
     }
     if (response.status === 409) {
@@ -208,48 +211,50 @@ async function submit({ auto }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ reportId: item.reportId, linkSecret: item.linkSecret }),
       });
+      if (!still(generation, key)) return;
       if (saved.status === 200) {
-        rememberLink(cloud, item, "off", 0);
+        rememberLink(cloud, item, key, generation);
         return;
       }
-      item.lastError = "这一份编号已用过。结果仍在这台设备上。";
+      item.lastError = "这次没生成链接";
       item.attempts = 8;
       cloud.upsertPending(item);
-      paint();
       return;
     }
     if (response.status === 422) {
-      item.lastError = "这份结果没有通过校验，没有上传。结果仍在这台设备上。";
+      item.lastError = "这次没生成链接";
       item.attempts = 8;
       cloud.upsertPending(item);
-      paint();
       return;
     }
-    failPending(item, response.status === 429 ? "提交太频繁，稍后再试。" : "这次没有保存成功。");
+    failPending(item, response.status === 429 ? "刚才点得太快了，稍后再试" : "这次没生成链接", generation, key);
   } catch {
-    if (item) failPending(item, "链接还没生成，结果仍在这台设备上。");
-    else rememberError("链接还没生成，结果仍在这台设备上。");
+    if (!still(generation, key)) return;
+    if (item) failPending(item, "这次没生成链接", generation, key);
+    else rememberError("这次没生成链接");
   } finally {
-    if (current) current.saving = false;
+    if (still(generation, key)) {
+      current.saving = false;
+      paint();
+    }
   }
 }
 
-function rememberLink(cloud, item, index, size) {
-  const reportUrl = buildShareUrl(resolveReportBase(location, config()), item.reportId, item.linkSecret);
+function rememberLink(cloud, item, key, generation) {
+  if (!still(generation, key)) return;
+  const reportUrl = buildShareUrl(resolveReportBase(globalThis.location, config()), item.reportId, item.linkSecret);
   cloud.removePending(item.reportId);
-  cloud.saveLink(current.orderKey, {
+  cloud.saveLink(key, {
     reportId: item.reportId,
     reportUrl,
     status: "active",
-    index: index || "off",
-    byteSize: size || 0,
+    byteSize: 0,
   });
-  if (current) current.note = "";
-  paint();
+  current.note = "";
 }
 
 function ensurePending(cloud) {
-  const found = cloud.pending().find((item) => item.orderKey === current.orderKey);
+  const found = pendingItem(current.orderKey);
   if (found) return found;
   const ids = createSubmissionIds();
   if (ids.linkSecret === ids.ownerToken) ids.ownerToken = createSubmissionIds().ownerToken;
@@ -273,16 +278,19 @@ function ensurePending(cloud) {
   return item;
 }
 
-function failPending(item, message) {
+function failPending(item, message, generation, key) {
   const cloud = store();
   item.attempts += 1;
   item.lastError = message;
   item.nextAt = Date.now() + backoffMs(item.attempts);
   cloud.upsertPending(item);
-  paint();
+  if (!still(generation, key)) return;
+  current.note = "";
   if (item.attempts < 8) {
     clearTimeout(timer);
-    timer = setTimeout(() => { void submit({ auto: true }); }, backoffMs(item.attempts));
+    timer = setTimeout(() => {
+      if (still(generation, key)) void submit();
+    }, backoffMs(item.attempts));
   }
 }
 
@@ -292,38 +300,45 @@ function rememberError(message) {
   paint();
 }
 
-async function copyLink() {
-  if (!current) return;
-  const saved = store().links()[current.orderKey];
-  if (!saved) return;
-  try {
-    await navigator.clipboard.writeText(saved.reportUrl);
-  } catch {
-    const input = slotEl && slotEl.querySelector(".sc-link");
-    if (input) {
-      input.focus();
-      input.select();
+async function writeClipboard(text) {
+  const nav = globalThis.navigator;
+  if (nav && nav.clipboard && nav.clipboard.writeText) {
+    try {
+      await nav.clipboard.writeText(text);
+      return;
+    } catch {
+      /* 下面再试一次系统复制。 */
     }
   }
+  const doc = globalThis.document;
+  const area = doc.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  doc.body.appendChild(area);
+  area.select();
+  const ok = doc.execCommand("copy");
+  area.remove();
+  if (!ok) throw new Error("copy");
 }
 
-async function revoke() {
+async function copyLink() {
   if (!current) return;
-  const cloud = store();
-  const saved = cloud.links()[current.orderKey];
-  const ownerToken = saved && cloud.owners()[saved.reportId];
-  const target = endpoint();
-  if (!saved || !ownerToken || !target) return;
+  const saved = activeSaved(current.orderKey);
+  if (!saved) return;
   try {
-    const response = await fetch(`${target}/v1/results/revoke`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ reportId: saved.reportId, ownerToken }),
-    });
-    if (response.status !== 200) return;
-    cloud.saveLink(current.orderKey, { ...saved, status: "revoked" });
-    paint();
+    await writeClipboard(saved.reportUrl);
+    current.note = "链接已复制";
   } catch {
-    /* 撤销失败时原链接保持原样，结果页不动。 */
+    current.note = "没复制上，再点一次";
   }
+  paint();
+  clearTimeout(copyTimer);
+  copyTimer = setTimeout(() => {
+    if (current && current.note === "链接已复制") {
+      current.note = "";
+      paint();
+    }
+  }, 2500);
 }

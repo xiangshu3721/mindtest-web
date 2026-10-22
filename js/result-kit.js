@@ -992,7 +992,8 @@
   function exportRecord(id) { var rec = list().filter(function (r) { return r.id === id; })[0]; return rec ? exportRec(rec) : Promise.resolve(); }
 
   /* ---------- 页面里的按钮条 ---------- */
-  function noteHtml() {
+  function noteHtml(opts) {
+    if (opts && opts.localNote === false) return "";
     if (lastSave && lastSave.ok) return '<p class="rk-note" data-rk-note="ok">✓ 这次结果已保存在这台设备（不上传），可在「历史记录」里再看。</p>';
     if (lastSave && !lastSave.ok) return '<p class="rk-note warn" data-rk-note="fail">这台设备暂时存不下记录（可能是无痕模式或空间已满）。结果照常能看，建议先点「导出图片」留一份。</p>';
     return '<p class="rk-note" data-rk-note="none">每次做完的结果都会记在「历史记录」里，只存在这台设备上。</p>';
@@ -1004,7 +1005,7 @@
     cur = clean(summary);
     if (lastSave && lastSave.id && typeof cfg.capture === "function") scheduleCapture(lastSave.id);
     var n = list().length;
-    return '<div class="rk-bar" data-rk-bar>' + noteHtml() + '<div class="rk-btns">' +
+    return '<div class="rk-bar" data-rk-bar>' + noteHtml(opts) + '<div class="rk-btns">' +
       (opts.export === false ? "" : '<button type="button" class="rk-btn primary" data-rk="export">导出图片</button>') +
       '<button type="button" class="rk-btn" data-rk="history">历史记录' + (n ? "（" + n + "）" : "") + "</button>" +
       (opts.restart === false ? "" : '<button type="button" class="rk-btn" data-rk="restart">重新测试</button>') +
