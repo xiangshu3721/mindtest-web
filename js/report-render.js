@@ -53,17 +53,18 @@ export function renderStarReport(report) {
   `;
 }
 
-// SEFS 阅读约定：不按 24 题重算。维度顺序与 my-react-app sefs/data.js 一致。
-// id：breadth、contain、belong、agency。
-// 分数优先 reportContent.viewModel，其次 dimensions，再次 extensionData.score（现网 calc()）。
-// 洞察优先 viewModel.insight，其次 interpretation / recommendations；都没有时用现网展示句。
+// SEFS 阅读约定：不按 24 题重算。字段对齐 my-react-app sefs/cloud-payload.js 的 buildSefsResult。
+// 维度 id：breadth、capacity、belonging、autonomy。level 是分档，levelLabel 是类型名。
+// 总分用 viewModel.total（或四维相加）；headline / summary / interpretation / recommendations 照原文。
+// recommendations 里 id 为 reader 的那句是「阅读页尚未接上」的旧说明，这里不再展示。
 const SEFS_NOTICE = "本量表为所提供 SEFS 草案的 H5 测试版。题目、分段及类型解释尚未在此提供可核验的信效度、常模或临床验证信息。分数、主导方向和复合关注均是草案规则下的描述，不可用于确诊、排除疾病、决定治疗或判断安全风险。若困扰持续、影响生活，或测评引起明显不适，建议与合格的心理健康专业人员讨论；如有立即危险，请联系当地急救或危机支持服务。";
 const SEFS_TAG = "探索性分析 · 非病理诊断";
+const SEFS_READER_GAP = "统一阅读页目前只重绘职业六芒星";
 const SEFS_IDS = [
   ["breadth", "breadth-of-experience", "range", "guangdu", "experience-breadth", "exp-breadth"],
-  ["contain", "containment", "capacity", "holding", "rongna", "experience-contain", "exp-contain"],
-  ["belong", "belonging", "ownership", "guishu", "experience-belong", "exp-belong"],
-  ["agency", "autonomy", "self-direction", "zizhu", "experience-agency", "exp-agency"],
+  ["capacity", "contain", "containment", "holding", "rongna", "experience-contain", "exp-contain"],
+  ["belonging", "belong", "ownership", "guishu", "experience-belong", "exp-belong"],
+  ["autonomy", "agency", "self-direction", "zizhu", "experience-agency", "exp-agency"],
 ];
 const SEFS_DIMS = [
   { name: "体验广度", type: "体验压缩型", brief: "感受的宽度与鲜活程度", color: "#79a993", suggest: "先从微弱而具体的身体感受开始，例如温度、触感或一点点好奇。无需要求自己立刻快乐。" },
@@ -129,11 +130,10 @@ function applyEntries(slots, list) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
     const max = num(raw.max);
     if (max != null && max > 0) slot.max = max;
-    const level = text(raw.level) || text(raw.levelLabel);
-    if (level) slot.level = level;
+    if (text(raw.level)) slot.level = text(raw.level);
     const brief = text(raw.narrative) || text(raw.brief);
     if (brief) slot.brief = brief;
-    const type = text(raw.type) || text(raw.extra && raw.extra.type);
+    const type = text(raw.type) || text(raw.extra && raw.extra.type) || text(raw.levelLabel);
     if (type) slot.type = type;
     const color = safeColor(raw.color || (raw.extra && raw.extra.color));
     if (color) slot.color = color;
@@ -194,7 +194,25 @@ function readComplex(report, slots) {
 function storedBlocks(report) {
   return [].concat(report.interpretation || [], report.recommendations || [])
     .filter((item) => item && text(item.text))
+    .filter((item) => item.id !== "reader" && !text(item.text).includes(SEFS_READER_GAP))
     .map((item) => ({ title: text(item.title), text: text(item.text) }));
+}
+
+function sectionTotal(report) {
+  const sections = report.reportContent && report.reportContent.sections;
+  if (!Array.isArray(sections)) return "";
+  const found = sections.find((section) => section && text(section.x).startsWith("总分"));
+  return found ? text(found.x) : "";
+}
+
+function unseen(blocks, seen) {
+  const out = [];
+  blocks.forEach((block) => {
+    if (seen.some((item) => item === block.text || item.includes(block.text))) return;
+    out.push(block);
+    seen.push(block.text);
+  });
+  return out;
 }
 
 function insightOf(report) {
@@ -242,25 +260,27 @@ function readSefs(report) {
   applyEntries(slots, viewModel.dimensions);
   const total = num(viewModel.total ?? calcOf(report).total ?? (report.result && report.result.total));
   const summed = slots.every((slot) => slot.score != null) ? slots.reduce((sum, slot) => sum + slot.score, 0) : null;
+  const totalValue = total != null ? total : summed;
   const leaders = readLeaders(report, slots);
   const complex = readComplex(report, slots);
   const insight = insightOf(report);
   const blocks = storedBlocks(report);
-  const summary = text(report.result && report.result.summary) || text(viewModel.summary)
-    || (total != null || summed != null ? `总分 ${showNum(total != null ? total : summed)} 分。它是四个体验维度的简单相加，不设未经验证的总体严重程度阈值。` : "");
+  const summary = text(report.result && report.result.summary) || text(viewModel.summary);
+  const headline = text(report.result && report.result.headline) || text(viewModel.headline);
+  const totalLine = sectionTotal(report)
+    || (totalValue != null ? `总分 ${showNum(totalValue)} 分。它是四个体验维度的简单相加，不设未经验证的总体严重程度阈值。` : "");
   let paragraphs = [];
   let order = "";
   let lead = "";
   if (insight) {
-    lead = insight.lead || text(report.result && report.result.headline) || leadLine(slots, leaders);
+    lead = insight.lead || headline || leadLine(slots, leaders);
     paragraphs = insight.paragraphs;
     order = insight.order;
-  } else if (blocks.length) {
-    lead = text(report.result && report.result.headline);
-    if (lead && blocks[0].text === lead) lead = "";
-    paragraphs = blocks;
+  } else if (blocks.length || summary || headline) {
+    lead = headline;
+    paragraphs = unseen(blocks, [headline, summary].filter(Boolean));
   } else if (slots.some((slot) => slot.score != null)) {
-    lead = text(report.result && report.result.headline) || leadLine(slots, leaders);
+    lead = leadLine(slots, leaders);
     const complexText = complex
       ? "按草案规则，有至少两个维度达到 15 分，属于“复合关注”模式。得分排序只是本次观察顺序，不等于临床干预优先级。"
       : "按草案规则，本次未达到“两个及以上维度均不少于 15 分”的复合关注条件。";
@@ -271,13 +291,14 @@ function readSefs(report) {
   }
   const label = text(report.result && report.result.label);
   const tag = (insight && insight.tag) || (label.includes("非病理") ? label : SEFS_TAG);
-  const narrative = [summary, lead, order].concat(paragraphs.map((item) => `${item.title}${item.text}`));
+  const narrative = [summary, totalLine, lead, order].concat(paragraphs.map((item) => `${item.title}${item.text}`));
   const disclaimer = insight && insight.disclaimer;
   const notice = disclaimer || (narrative.join("\n").includes("可核验的信效度") ? "" : SEFS_NOTICE);
   return {
-    name: text(report.assessmentName) || "SEFS 主观体验功能状态量表",
-    total: total != null ? total : summed,
+    name: text(report.assessmentName) || "SEFS · 主观体验功能状态量表",
+    total: totalValue,
     maxTotal: num(viewModel.maxTotal) || 96,
+    totalLine,
     summary,
     slots,
     leaders,
@@ -356,11 +377,12 @@ export function renderSefsReport(report) {
       <p class="sefs-dim-meta"><span>${esc(slot.brief)}</span><span>${esc(levelText(slot))}</span></p>
     </article>
   `).join("");
-  const totalBlock = model.total == null && !model.summary
+  const totalBlock = model.total == null
     ? `<p class="state">这份结果里没有可显示的分数。</p>`
     : `<section class="sefs-total">
-        ${model.total == null ? "" : `<p class="sefs-total-num"><strong>${esc(showNum(model.total))}</strong><span> / ${esc(showNum(model.maxTotal))}</span></p><p class="sefs-total-label">四个维度总计</p>`}
-        ${model.summary ? `<p>${esc(model.summary)}</p>` : ""}
+        <p class="sefs-total-num"><strong>${esc(showNum(model.total))}</strong><span> / ${esc(showNum(model.maxTotal))}</span></p>
+        <p class="sefs-total-label">四个维度总计</p>
+        ${model.totalLine ? `<p>${esc(model.totalLine)}</p>` : ""}
       </section>`;
   return `
     <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
@@ -373,6 +395,7 @@ export function renderSefsReport(report) {
     <section class="sefs-insight">
       <p class="sefs-tag">${esc(model.tag)}</p>
       ${model.lead ? `<h3>${esc(model.lead)}</h3>` : ""}
+      ${model.summary ? `<p>${esc(model.summary)}</p>` : ""}
       ${model.paragraphs.map(paragraphHtml).join("")}
       ${model.order ? `<p class="sefs-order">${esc(model.order)}</p>` : ""}
     </section>

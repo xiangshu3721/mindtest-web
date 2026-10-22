@@ -139,6 +139,65 @@ test("SEFS 统一协议字段优先于 calc()，原文洞察不再重写", () =>
   assert.equal(html.split(notice).length - 1, 1);
 });
 
+test("SEFS 按 buildSefsResult 的定稿字段阅读", () => {
+  const html = renderReport({
+    assessmentId: "sefs",
+    assessmentName: "SEFS · 主观体验功能状态量表",
+    assessmentVersion: "sefs-h5-v1",
+    nickname: "阿禾",
+    completedAt: when,
+    dimensions: [
+      { id: "autonomy", name: "体验自主", kind: "score", score: 15, max: 24, level: "中度受损", levelLabel: "体验被侵占型", labels: [] },
+      { id: "belonging", name: "体验归属", kind: "score", score: 9, max: 24, level: "轻度受损", levelLabel: "体验割裂型", labels: [] },
+      { id: "capacity", name: "体验容纳", kind: "score", score: 6, max: 24, level: "功能基本完好", levelLabel: "体验泛滥型", labels: [] },
+      { id: "breadth", name: "体验广度", kind: "score", score: 18, max: 24, level: "中度受损", levelLabel: "体验压缩型", labels: [] },
+    ],
+    result: {
+      headline: "相对突出的体验方向：体验广度（体验压缩型）",
+      code: null,
+      label: "探索性分析 · 非病理诊断",
+      summary: "按草案规则，有至少两个维度达到 15 分，属于“复合关注”模式。得分排序只是本次观察顺序，不等于临床干预优先级。可以尝试：先从微弱而具体的身体感受开始，例如温度、触感或一点点好奇。无需要求自己立刻快乐。",
+      flags: ["complex"],
+    },
+    interpretation: [
+      { id: "lead", title: null, text: "相对突出的体验方向：体验广度（体验压缩型）" },
+      { id: "pattern", title: null, text: "按草案规则，有至少两个维度达到 15 分，属于“复合关注”模式。得分排序只是本次观察顺序，不等于临床干预优先级。" },
+      { id: "ranking", title: null, text: "四维度从高到低：体验广度 18分 · 体验自主 15分 · 体验归属 9分 · 体验容纳 6分。" },
+    ],
+    recommendations: [
+      { id: "try", title: null, text: "可以尝试：先从微弱而具体的身体感受开始，例如温度、触感或一点点好奇。无需要求自己立刻快乐。" },
+      { id: "reader", title: null, text: "统一阅读页目前只重绘职业六芒星，SEFS 的阅读页会另开 mindtest-web 任务。链接和存档已按统一协议保存。" },
+    ],
+    reportContent: {
+      format: "view-model+sections",
+      viewModel: { scores: [18, 6, 9, 15], total: 48, leaders: [0], complex: true, levels: ["中度受损", "功能基本完好", "轻度受损", "中度受损"] },
+      sections: [
+        { t: "p", x: "总分 48 / 96。它是四个体验维度的简单相加，不设未经验证的总体严重程度阈值。" },
+      ],
+    },
+    extensionData: { score: { scores: [1, 1, 1, 1], total: 4, leaders: [3], complex: false } },
+  });
+  assert.equal(html.includes(">48<"), true);
+  assert.equal(html.includes("/ 96"), true);
+  assert.equal(html.includes("总分 48 / 96。它是四个体验维度的简单相加，不设未经验证的总体严重程度阈值。"), true);
+  assert.equal(html.includes("18 <small>/ 24</small>"), true);
+  assert.equal(html.includes("6 <small>/ 24</small>"), true);
+  assert.equal(html.includes("9 <small>/ 24</small>"), true);
+  assert.equal(html.includes("15 <small>/ 24</small>"), true);
+  assert.equal(html.indexOf("体验广度") < html.indexOf("体验容纳"), true);
+  assert.equal(html.indexOf("体验容纳") < html.indexOf("体验归属"), true);
+  assert.equal(html.indexOf("体验归属") < html.indexOf("体验自主"), true);
+  assert.equal(html.includes("中度受损*"), true);
+  assert.equal(html.includes("体验压缩型*"), false);
+  assert.equal(html.split("相对突出的体验方向：体验广度（体验压缩型）").length - 1, 1);
+  assert.equal(html.split("可以尝试：").length - 1, 1);
+  assert.equal(html.split("属于“复合关注”模式").length - 1, 1);
+  assert.equal(html.includes("四维度从高到低：体验广度 18分 · 体验自主 15分 · 体验归属 9分 · 体验容纳 6分。"), true);
+  assert.equal(html.includes("统一阅读页目前只重绘职业六芒星"), false);
+  assert.equal(html.includes("sefs-h5-v1"), true);
+  assert.equal(html.includes("SEFS · 主观体验功能状态量表"), true);
+});
+
 test("SEFS 原文里已有声明时不重复贴一份", () => {
   const notice = "题目、分段及类型解释尚未在此提供可核验的信效度、常模或临床验证信息。";
   const html = renderReport({
