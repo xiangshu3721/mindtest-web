@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { WORDS } from "../../star/js/data.js";
 import { buildStarResult } from "../../star/js/cloud-payload.js";
+import { buildSefsResult } from "./vendor/sefs-payload.mjs";
 import { createHandler } from "./lib/handler.mjs";
 import { createCloudBaseStore, createMemoryStore, tableSql } from "./lib/store.mjs";
 import { buildGithubShareUrl, createFeishuHttpWriter, createFeishuIndex, feishuLiveReady, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
@@ -450,9 +451,12 @@ test("拒绝分数、其他测评、手机号字段、过大正文、错误来�
   })).status, 422);
   const other = result();
   other.payload.assessmentId = "scl90";
-  assert.equal((await post({ handle }, "/v1/results", {
+  const rejected = await post({ handle }, "/v1/results", {
     result: other.payload, linkSecret: other.linkSecret, ownerToken: other.ownerToken,
-  }, { ip: "203.0.113.30" })).status, 422);
+  }, { ip: "203.0.113.30" });
+  assert.equal(rejected.status, 422);
+  assert.equal(rejected.body.issues.includes("测评不在可保存范围内"), true);
+  assert.equal(JSON.stringify(rejected.body).includes("只接受职业六芒星"), false);
   const phone = result();
   phone.payload.extensionData.phone = "13800000000";
   assert.equal((await post({ handle }, "/v1/results", {
@@ -860,6 +864,62 @@ test("手机预览只带六芒星，阅读页指向 preview，来源加入白名
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+function sefsBody(answers, id = ids()) {
+  const payload = buildSefsResult({
+    nickname: "小林",
+    answers,
+    completedAt: "2026-10-22T12:00:00+08:00",
+    ...id,
+  });
+  return { payload, ...id };
+}
+
+test("SEFS 合法结果可以保存，飞书行带分享链接；作答被改过仍是 422", async () => {
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock" });
+  const { handle, store } = app({ feishu });
+  const answers = Array(24).fill(0);
+  for (let i = 6; i < 12; i += 1) answers[i] = 3;
+  const made = sefsBody(answers);
+  assert.equal(made.payload.result.headline, "相对突出的体验方向：体验容纳（体验泛滥型）");
+  assert.equal(made.payload.result.summary.includes("先关注当下的安全感和稳定感"), true);
+  assert.deepEqual(made.payload.dimensions.map((item) => item.id), ["breadth", "capacity", "belonging", "autonomy"]);
+  const created = await post({ handle }, "/v1/results", {
+    result: made.payload, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  }, { headers: { origin: "https://xiangshu3721.github.io" }, ip: "203.0.113.70" });
+  assert.equal(created.status, 200);
+  assert.equal(created.headers["access-control-allow-origin"], "https://xiangshu3721.github.io");
+  assert.equal(feishu.rows.length, 1);
+  assert.equal(feishu.rows[0]["测评 ID"], "sefs");
+  assert.equal(feishu.rows[0]["测评名称"], "SEFS · 主观体验功能状态量表");
+  assert.equal(feishu.rows[0]["分享链接"], buildGithubShareUrl(made.reportId, made.linkSecret));
+  assert.equal(feishu.rows[0]["分享链接"].startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
+  assert.equal(feishu.rows[0]["分享链接"].includes("rpt_"), false);
+  const read = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  }, { ip: "203.0.113.71" });
+  assert.equal(read.status, 200);
+  assert.equal(read.body.assessmentId, "sefs");
+  const revoked = await post({ handle }, "/v1/results/revoke", {
+    reportId: made.reportId, ownerToken: made.ownerToken,
+  }, { ip: "203.0.113.72" });
+  assert.equal(revoked.status, 200);
+
+  const broken = sefsBody(answers);
+  broken.payload.dimensions[1].score = 1;
+  const invalid = await post({ handle }, "/v1/results", {
+    result: broken.payload, linkSecret: broken.linkSecret, ownerToken: broken.ownerToken,
+  }, { ip: "203.0.113.73" });
+  assert.equal(invalid.status, 422);
+  const short = sefsBody(answers.slice(0, 23));
+  assert.equal(short.payload, null);
+  const named = sefsBody(answers);
+  named.payload.assessmentName = "主观体验";
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: named.payload, linkSecret: named.linkSecret, ownerToken: named.ownerToken,
+  }, { ip: "203.0.113.74" })).status, 422);
+  assert.equal(store.size(), 1);
 });
 
 test("其他测评页面没有接上云端块", async () => {
