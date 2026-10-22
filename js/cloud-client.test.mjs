@@ -77,21 +77,35 @@ test("正式报告链接在 GitHub Pages，接口是 assessment-report-dev", asy
   assert.equal(star.includes("tcloudbase"), false);
 });
 
-test("新分享链接比旧的长链接短，旧链接仍能打开", () => {
+test("更短的分享链接能打开，旧长链和上一版短链也能打开，过短的拒绝", () => {
   const ids = createSubmissionIds();
-  assert.match(ids.reportId, /^rpt_[A-Za-z0-9_-]{16}$/);
-  assert.match(ids.linkSecret, /^[A-Za-z0-9_-]{22}$/);
-  assert.match(ids.ownerToken, /^[A-Za-z0-9_-]{22,128}$/);
+  assert.match(ids.reportId, /^rpt_[A-Za-z0-9_-]{11}$/);
+  assert.match(ids.linkSecret, /^[A-Za-z0-9_-]{16}$/);
+  assert.match(ids.ownerToken, /^[A-Za-z0-9_-]{24}$/);
   const url = buildShareUrl("https://xiangshu3721.github.io/mindtest-web/r/", ids.reportId, ids.linkSecret);
+  const previous = buildShareUrl(
+    "https://xiangshu3721.github.io/mindtest-web/r/",
+    `rpt_${"a".repeat(16)}`,
+    "b".repeat(22),
+  );
   const legacy = "https://xiangshu3721.github.io/mindtest-web/r/#rpt_abcdefghijklmnopqrstuvwx.0123456789abcdefghijklmnopqrstuvwxyz0123456";
   assert.equal(url.startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
   assert.equal(url.includes("rpt_"), false);
-  assert.ok(url.length <= 90);
-  assert.ok(legacy.length - url.length >= 25);
+  assert.equal(url.length, 75);
+  assert.equal(previous.length, 86);
+  assert.ok(legacy.length > previous.length);
   assert.equal(parseShareLink(url).reportId, ids.reportId);
   assert.equal(parseShareLink(url).linkSecret, ids.linkSecret);
+  assert.equal(parseShareLink(previous).reportId, `rpt_${"a".repeat(16)}`);
+  assert.equal(parseShareLink(previous).linkSecret, "b".repeat(22));
   assert.equal(parseShareLink(legacy).reportId, "rpt_abcdefghijklmnopqrstuvwx");
   assert.equal(parseShareLink(legacy).linkSecret.length, 43);
+  assert.equal(parseShareLink(`#${"a".repeat(64)}.${"b".repeat(128)}`).reportId, `rpt_${"a".repeat(64)}`);
+  assert.equal(parseShareLink(`#${"a".repeat(10)}.${"b".repeat(16)}`), null);
+  assert.equal(parseShareLink(`#${"a".repeat(11)}.${"b".repeat(15)}`), null);
+  assert.equal(parseShareLink(`#rpt_${"a".repeat(10)}.${"b".repeat(16)}`), null);
+  assert.equal(parseShareLink(`#${"a".repeat(65)}.${"b".repeat(16)}`), null);
+  assert.equal(parseShareLink(`#${"a".repeat(11)}.${"b".repeat(129)}`), null);
 });
 
 test("本机自动连本地服务，GitHub Pages 在没配置端点时不连", () => {
