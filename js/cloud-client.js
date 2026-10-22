@@ -13,10 +13,11 @@ export function randomToken(bytes = 32, cryptoObj = globalThis.crypto) {
 
 export function createSubmissionIds(cryptoObj) {
   return {
-    reportId: `rpt_${randomToken(18, cryptoObj)}`,
+    // 12 字节是 16 个字符，16 字节是 22 个字符。这是已上线函数允许的最短长度。
+    reportId: `rpt_${randomToken(12, cryptoObj)}`,
     clientSubmissionId: `sub_${randomToken(18, cryptoObj)}`,
-    linkSecret: randomToken(32, cryptoObj),
-    ownerToken: randomToken(32, cryptoObj),
+    linkSecret: randomToken(16, cryptoObj),
+    ownerToken: randomToken(18, cryptoObj),
   };
 }
 
@@ -28,8 +29,9 @@ export function parseShareHash(hash) {
   const text = String(hash || "").replace(/^#/, "").trim();
   const dot = text.indexOf(".");
   if (dot < 0) return null;
-  const reportId = text.slice(0, dot);
+  let reportId = text.slice(0, dot);
   const linkSecret = text.slice(dot + 1);
+  if (!reportId.startsWith("rpt_")) reportId = `rpt_${reportId}`;
   if (!REPORT_RE.test(reportId) || !SECRET_RE.test(linkSecret)) return null;
   return { reportId, linkSecret };
 }
@@ -43,7 +45,8 @@ export function parseShareLink(input) {
 
 export function buildShareUrl(base, reportId, linkSecret) {
   const root = String(base || "").replace(/\/?$/, "/");
-  return `${root}#${reportId}.${linkSecret}`;
+  const id = String(reportId || "").replace(/^rpt_/, "");
+  return `${root}#${id}.${linkSecret}`;
 }
 
 export function backoffMs(attempt) {

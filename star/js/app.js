@@ -1,5 +1,5 @@
 import { CULL_FIRST, CULL_SECOND, CULL_THIRD, GROUPS, KEEP, REVIVE, WORDS } from "./data.js";
-import { mountStarCloud } from "../../js/cloud-kit.js";
+import { mountStarCloud } from "../../js/cloud-kit.js?v=share1";
 
 const app = document.querySelector("#app");
 const STORAGE = "career-star-v2";
@@ -408,7 +408,7 @@ function renderResult() {
   let bar = "";
   if (RK) {
     // 与其他测试同样的按钮条（导出图片 / 历史记录），导出的长图含六芒星图、两组词和说明
-    bar = RK.bar(summarize(), { restart: false, export: false })
+    bar = RK.bar(summarize(), { restart: false, export: false, localNote: false })
       .replace('<div class="rk-btns">', '<div class="rk-btns"><button type="button" class="rk-btn primary" data-action="save-image">导出图片</button>');
   } else {
     bar = '<div class="actions"><button class="primary" type="button" data-action="save-image">导出图片</button></div>';
@@ -437,11 +437,11 @@ function renderResult() {
       </section>
     </div>
     ${bar}
+    <div id="star-cloud"></div>
     <div class="actions" style="margin-top:22px">
       <button class="ghost" type="button" data-action="retest">重新测试</button>
       <a class="ghost" href="../index.html">回到目录</a>
     </div>
-    <div id="star-cloud"></div>
   `);
 }
 
