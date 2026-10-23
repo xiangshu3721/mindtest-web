@@ -1,9 +1,23 @@
 import { ASSESSMENT_CLOUD_CONFIG } from "./assessment-cloud-config.js";
 import { parseShareHash, resolveEndpoint } from "./cloud-client.js";
-import { renderReport } from "./report-render.js?v=cloud8";
+import { renderReport, sharePageTitle } from "./report-render.js?v=cloud9";
 
 const box = document.querySelector("#report");
 const endpoint = resolveEndpoint(location, { ...ASSESSMENT_CLOUD_CONFIG, ...(window.ASSESSMENT_CLOUD_CONFIG || {}) });
+const KNOWN_ASSESSMENTS = ["star", "sefs", "scl90", "pdq4", "ecr", "root", "loves5", "juying", "holland"];
+
+function applyPageTitle(report) {
+  const title = sharePageTitle(report);
+  document.title = title;
+  for (const selector of ['meta[property="og:title"]', 'meta[property="og:description"]']) {
+    const node = document.querySelector(selector);
+    if (node) node.setAttribute("content", title);
+  }
+  const shell = document.querySelector("article.sheet > h1");
+  if (!shell) return;
+  if (KNOWN_ASSESSMENTS.includes(report && report.assessmentId)) shell.remove();
+  else shell.textContent = title;
+}
 
 function setAssessment(id) {
   if (typeof id === "string" && id) document.body.dataset.assessment = id;
@@ -59,6 +73,7 @@ async function load() {
     const report = await response.json();
     setAssessment(report && report.assessmentId);
     box.innerHTML = renderReport(report);
+    applyPageTitle(report);
   } catch {
     show("打不开", true);
   }

@@ -8,7 +8,7 @@ import { FACTORS } from "../scl90/js/data.js";
 import { scoreScl90 } from "../scl90/js/score.js";
 import { QUESTIONS, REVERSE_ITEMS } from "../ecr/js/data.js";
 import { scoreEcr } from "../ecr/js/score.js";
-import { renderHollandReport, renderJuyingReport, renderLoves5Report, renderReport } from "./report-render.js";
+import { renderHollandReport, renderJuyingReport, renderLoves5Report, renderReport, sharePageTitle } from "./report-render.js";
 
 const when = "2026-10-22T09:30:00+08:00";
 
@@ -43,6 +43,7 @@ test("旧的六芒星报告仍然可读", () => {
   });
   const html = renderReport(report);
   assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes('<h1 class="star-title"><span class="share-nick">小林</span>的职业六芒星</h1>'), true);
   assert.equal(html.includes("底层动力"), true);
   assert.equal(html.includes("现实追求"), true);
   assert.equal(html.includes(drive[0]), true);
@@ -81,7 +82,7 @@ test("SEFS 用现网 calc() 画出总分、四维和洞察", () => {
   assert.equal(html.includes("先从微弱而具体的身体感受开始"), true);
   assert.equal(html.includes("探索性分析 · 非病理诊断"), true);
   assert.equal(html.includes("可核验的信效度"), true);
-  assert.equal(html.includes("阿禾"), true);
+  assert.equal(html.includes('<h1 class="result-title"><span class="share-nick">阿禾</span>的主观体验地图</h1>'), true);
   assert.equal(html.includes("sefs-v4"), true);
   assert.equal(html.includes("2026年10月22日"), true);
 });
@@ -433,6 +434,7 @@ test("SCL-90 没有 viewModel 时退回 extensionData.score", () => {
 
 test("SCL-90 缺字段时降级，不白屏，也不把空分画成 0", () => {
   const html = renderReport({ assessmentId: "scl90", nickname: "阿禾", completedAt: when });
+  assert.equal(html.includes('<h1><span class="share-nick">阿禾</span>的症状自评量表</h1>'), true);
   assert.equal(html.includes("这份报告的阅读页还没接上"), false);
   assert.equal(html.includes("这份结果里没有可显示的分数。"), true);
   assert.equal(html.includes("筛查不是诊断"), true);
@@ -1086,6 +1088,7 @@ test("ECR 贴着中点时写出恐惧型，并标出并列或贴近的说明", (
   assert.equal(scored.type.id, "fearful");
   assert.equal(scored.nearMidpoint, true);
   assert.equal(html.includes("<h1 class=\"sefs-name\">恐惧型</h1>"), true);
+  assert.equal(html.includes('<p class="share-person"><span class="share-nick">阿禾</span></p>'), true);
   assert.equal(html.includes("4.00 <small>/ 7</small>"), true);
   assert.equal(html.includes("处于中点"), true);
   assert.equal(html.includes("两个均分都贴着中点"), true);
@@ -1165,7 +1168,7 @@ test("寻根之旅用 viewModel 画出四项能力、八个维度、发现和家
   });
   assert.equal(html.includes("这份报告的阅读页还没接上"), false);
   assert.equal(html.includes("寻根之旅 · 生命成长地图"), true);
-  assert.equal(html.includes("<h1 class=\"sefs-name\">我的生命成长地图</h1>"), true);
+  assert.equal(html.includes('<h1 class="sefs-name"><span class="share-nick">阿禾</span>的生命成长地图</h1>'), true);
   assert.equal(html.includes("不该用的标题"), false);
   assert.equal(html.includes("不该用的摘要"), false);
   assert.equal(html.includes("不该用的发现"), false);
@@ -1547,7 +1550,7 @@ test("霍兰德兴趣探索画出三字码、六个分数和结构", () => {
   const html = renderReport(report);
   assert.equal(html, renderHollandReport(report));
   assert.equal(html.includes("这份报告的阅读页还没接上"), false);
-  assert.equal(html.includes("小林"), true);
+  assert.equal(html.includes('<h1 class="r-title"><span class="r-nick">小林</span><span class="red">的兴趣地图</span></h1>'), true);
   assert.equal(html.includes("的兴趣地图"), true);
   assert.equal(html.includes("核心兴趣组合：RIA"), true);
   assert.equal(html.includes("class=\"radar\""), true);
@@ -1583,6 +1586,7 @@ test("霍兰德兴趣探索画出三字码、六个分数和结构", () => {
   assert.equal(aliased.includes("社会"), true);
 
   const empty = renderHollandReport({ assessmentId: "holland" });
+  assert.equal(empty.includes('<span class="r-nick">我</span><span class="red">的兴趣地图</span>'), true);
   assert.equal(empty.includes("这份结果里没有可显示的兴趣分数。"), true);
   assert.equal(empty.includes("霍兰德兴趣探索"), true);
   assert.equal(empty.includes("不是职业诊断"), true);
@@ -1600,6 +1604,15 @@ test("霍兰德兴趣探索画出三字码、六个分数和结构", () => {
   assert.equal(hostile.includes("<i>"), false);
   assert.equal(hostile.includes("&lt;script&gt;q&lt;/script&gt;"), true);
   assert.equal(hostile.includes("&lt;b&gt;码&lt;/b&gt;"), true);
+});
+
+test("分享页标题用昵称，空昵称降级为我", () => {
+  assert.equal(sharePageTitle({ assessmentId: "holland", nickname: "翔叔" }), "翔叔的兴趣地图");
+  assert.equal(sharePageTitle({ assessmentId: "sefs", nickname: "  " }), "我的主观体验地图");
+  assert.equal(sharePageTitle({ assessmentId: "scl90" }), "我的症状自评量表");
+  assert.equal(sharePageTitle({ assessmentId: "juying", nickname: "小林" }), "小林的巨婴测评");
+  assert.equal(sharePageTitle({ assessmentId: "nope", assessmentName: "珍爱金字塔", nickname: "小林" }), "小林的珍爱金字塔");
+  assert.equal(sharePageTitle(null), "我的测评报告");
 });
 
 test("只有 assessmentId 正好是 root 才画寻根之旅", () => {

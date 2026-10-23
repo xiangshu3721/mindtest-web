@@ -7,6 +7,41 @@ function esc(value) {
   }[char]));
 }
 
+const NICK_FALLBACK = "我";
+
+export function visibleNickname(value) {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name || NICK_FALLBACK;
+}
+
+const SHARE_TITLES = {
+  holland: "兴趣地图",
+  sefs: "主观体验地图",
+  scl90: "症状自评量表",
+  pdq4: "人格筛查",
+  ecr: "依恋结果",
+  root: "生命成长地图",
+  loves5: "爱的五种语言",
+  juying: "巨婴测评",
+  star: "职业六芒星",
+};
+
+export function sharePageTitle(report) {
+  const nick = visibleNickname(report && report.nickname);
+  const phrase = SHARE_TITLES[report && report.assessmentId];
+  if (phrase) return `${nick}的${phrase}`;
+  const name = report && typeof report.assessmentName === "string" ? report.assessmentName.trim() : "";
+  return name ? `${nick}的${name}` : `${nick}的测评报告`;
+}
+
+function nickMark(value) {
+  return `<span class="share-nick">${esc(visibleNickname(value))}</span>`;
+}
+
+function personLine(value) {
+  return `<p class="share-person">${nickMark(value)}</p>`;
+}
+
 function words(list) {
   return (list || []).map((word) => `<li>${esc(word)}</li>`).join("");
 }
@@ -44,6 +79,7 @@ export function renderStarReport(report) {
     .filter(Boolean);
   return `
     <div class="star-map">
+      <h1 class="star-title">${nickMark(report.nickname)}的职业六芒星</h1>
       <div class="capture">
         <figure class="plate">
           <p class="aside drive">底层动力</p>
@@ -56,7 +92,7 @@ export function renderStarReport(report) {
             ${starTags(drive, "drive", STAR_DRIVE_SLOTS)}
             ${starTags(pursue, "pursue", STAR_PURSUE_SLOTS)}
           </div>
-          <h1 class="spine">职业六芒星</h1>
+          <p class="spine">职业六芒星</p>
         </figure>
         <section class="roster">
           <div>
@@ -411,7 +447,7 @@ export function renderSefsReport(report) {
   return `
     <div class="sefs-map">
       <p class="eyebrow">YOUR EXPERIENCE MAP</p>
-      <h1 class="result-title">你的主观体验地图</h1>
+      <h1 class="result-title">${nickMark(model.nickname)}的主观体验地图</h1>
       <p class="result-sub">这些数字只是一次观察，不能定义完整的你。</p>
       <p class="sefs-scale">${esc(model.name)}</p>
       ${totalBlock}
@@ -1094,7 +1130,7 @@ export function renderScl90Report(report) {
   return `
     <div class="scl-map">
       <p class="kicker"><i class="mark"></i> 测评报告</p>
-      <h1>症状自评量表</h1>
+      <h1>${nickMark(model.nickname)}的症状自评量表</h1>
       <p class="scl-scale-name">${esc(model.name)}</p>
       <p class="sub">最近一周的感受筛查。筛查不是诊断。</p>
       ${who}
@@ -1515,6 +1551,7 @@ export function renderPdq4Report(report) {
   return `
     <div class="pdq-map">
       <p class="kicker">测评结果${model.completedAt ? ` · ${esc(when(model.completedAt))}` : ""}</p>
+      ${personLine(model.nickname)}
       <h1>${esc(model.verdict.title || model.name)}</h1>
       ${model.verdict.title ? `<p class="sub">${esc(model.name)}</p>` : ""}
       <p class="sub">筛查不是诊断。达到划界只说明值得再了解，不能代替面谈。</p>
@@ -2034,6 +2071,7 @@ export function renderEcrReport(report) {
     <div class="ecr-map">
       <p class="kicker">测评结果</p>
       ${who}
+      ${personLine(model.nickname)}
       <h1 class="sefs-name">${esc(heading)}</h1>
       <p class="sub">${esc(ECR_KICKER)}</p>
       ${model.type.short ? `<p class="ename">${esc(model.type.short)}</p>` : ""}
@@ -2778,7 +2816,12 @@ function rootGrowth(model) {
 
 export function renderRootReport(report) {
   const model = readRoot(report);
-  const title = model.headline || "我的生命成长地图";
+  const nick = visibleNickname(model.nickname);
+  const rawTitle = model.headline || "我的生命成长地图";
+  const mapTitle = rawTitle === "我的生命成长地图" || rawTitle === "生命成长地图";
+  const head = mapTitle
+    ? `<h1 class="sefs-name">${nickMark(model.nickname)}的生命成长地图</h1>`
+    : `${rawTitle.includes(nick) ? "" : personLine(model.nickname)}<h1 class="sefs-name">${esc(rawTitle)}</h1>`;
   const findings = model.findings.length
     ? `<section class="life-findings"><h2>关键发现</h2>${model.findings.map((line, index) => `<article><b>${String(index + 1).padStart(2, "0")}</b><p>${esc(line)}</p></article>`).join("")}</section>`
     : "";
@@ -2791,7 +2834,7 @@ export function renderRootReport(report) {
       <div class="life-map-head">
         <div>
           <span>觉塑 · 成长诊断</span>
-          <h1 class="sefs-name">${esc(title)}</h1>
+          ${head}
           <p>你已有一些可依靠的成长资源；下一步更值得把注意力放在现实选择与关系中的具体反应上。分数用于观察相对状态，不代表医学或人格诊断。</p>
           <p class="sub">${esc(model.scaleName)}。${esc(ROOT_NOTICE)}</p>
         </div>
@@ -2989,6 +3032,7 @@ export function renderLoves5Report(report) {
   return `
     <div class="loves-map">
       <p class="sub">${esc(model.scaleName)}</p>
+      ${personLine(model.nickname)}
       <h1 class="sefs-name">${esc(model.headline || model.scaleName)}</h1>
       ${tie}
       ${model.summary ? `<p class="lead">${esc(model.summary)}</p>` : ""}
@@ -3185,6 +3229,7 @@ export function renderJuyingReport(report) {
   return `
     <div class="jy-map">
       <p class="sub">${esc(model.scaleName)}</p>
+      ${personLine(model.nickname)}
       <h1>${title}</h1>
       ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
       ${average == null ? "" : `<p class="lead">20 项平均 ${esc(String(average))} 分。0 是一点也不像，2 是有一点像，3 是有些像，4 是很像，5 是与我一样。</p>`}
@@ -3208,7 +3253,9 @@ export function renderJuyingReport(report) {
 }
 
 export function renderHollandReport(report) {
-  return renderHollandMap(report);
+  const safe = report && typeof report === "object" ? report : {};
+  const html = renderHollandMap({ ...safe, nickname: visibleNickname(safe.nickname) });
+  return html.replace(/<h2 class="r-title">([\s\S]*?)<\/h2>/, "<h1 class=\"r-title\">$1</h1>");
 }
 
 export function renderReport(report) {
