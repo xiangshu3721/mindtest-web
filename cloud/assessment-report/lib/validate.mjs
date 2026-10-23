@@ -22,7 +22,15 @@ import {
   ecrViewModel,
   scoreEcr,
 } from "../vendor/ecr-score.mjs";
-import { REPORT_ID_RE, SECRET_RE, SUBMISSION_RE } from "./ids.mjs";
+import {
+  ROOT_CONSENT_VERSION,
+  ROOT_READER_GAP,
+  ROOT_VERSION,
+  developmentAnswersOk,
+  lifeMapAnswersOk,
+  rootBodyParts,
+} from "../vendor/root-score.mjs";
+import { ALLOWED_ASSESSMENT_IDS, REPORT_ID_RE, SECRET_RE, SUBMISSION_RE } from "./ids.mjs";
 
 export const STAR_VERSION = "star-words-31-v1";
 export const CONSENT_VERSION = "consent-assessment-star-1";
@@ -841,12 +849,153 @@ export function validateEcrResult(result) {
   return issues;
 }
 
+const ROOT_EXTENSION_KEYS = new Set([
+  "answers", "developmentAnswers", "score", "quality", "consent", "compat", "attribution",
+]);
+const ROOT_SCOPES = ["store", "share_link", "mentor_read"];
+const ROOT_ARCHIVE_KEY = /parent|father|mother|people|materials|journey|archive|openanswers|open_answers|opentext|open_text|birth|档案|父母|父亲|母亲/i;
+const ROOT_PHONE_VALUE = /(?:^|[^\d])1[3-9]\d{9}(?:$|[^\d])/;
+
+function scanRootArchive(value, issues, path) {
+  if (!value || typeof value !== "object") return;
+  const keys = Array.isArray(value) ? [] : Object.keys(value);
+  for (const key of keys) {
+    if (ROOT_ARCHIVE_KEY.test(key)) issues.push(`${path}.${key} 不能保存父母档案`);
+    scanRootArchive(value[key], issues, `${path}.${key}`);
+  }
+  if (Array.isArray(value)) value.forEach((item, index) => scanRootArchive(item, issues, `${path}[${index}]`));
+}
+
+function scanRootPhones(value, issues, path) {
+  if (typeof value === "string") {
+    if (ROOT_PHONE_VALUE.test(value)) issues.push(`${path} 不能保存手机号`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => scanRootPhones(item, issues, `${path}[${index}]`));
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) scanRootPhones(value[key], issues, `${path}.${key}`);
+  }
+}
+
+export function validateRootResult(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  scanKeys(result, issues, "result");
+  scanRootArchive(result, issues, "result");
+  scanRootPhones(result, issues, "result");
+  for (const key of Object.keys(result)) {
+    if (!TOP_KEYS.has(key)) issues.push(`不能保存额外字段 ${key}`);
+  }
+  if (!REPORT_ID_RE.test(String(result.reportId || ""))) issues.push("reportId 格式不对");
+  if (result.assessmentId !== "root") issues.push("测评不在可保存范围内");
+  const name = String(result.assessmentName || "");
+  if (!name.includes("寻根") && !name.includes("生命成长地图")) issues.push("测评名称不对");
+  if (result.assessmentVersion !== ROOT_VERSION) issues.push("规则版本不对");
+  if (result.schemaVersion !== SCHEMA_VERSION) issues.push("协议版本不对");
+  const nick = chars(result.nickname);
+  if (nick.length < 1 || nick.length > 12) issues.push("昵称需要 1–12 个字");
+  if (!Number.isFinite(Date.parse(result.completedAt))) issues.push("完成时间不对");
+
+  const view = result.reportContent && result.reportContent.viewModel;
+  const answers = view && view.answers;
+  const developmentAnswers = view && view.developmentAnswers;
+  const answersOk = lifeMapAnswersOk(answers);
+  const developmentOk = developmentAnswersOk(developmentAnswers);
+  if (!answersOk) issues.push("作答需要 33 道 1–5 的整数题（28 项能力 + 5 道家庭氛围）");
+  if (!developmentOk) issues.push("发展题需要 4 道 1–5 的整数题");
+
+  const dimensions = result.dimensions;
+  if (!Array.isArray(dimensions) || dimensions.length !== 12) issues.push("寻根之旅需要八项能力与四个模块");
+
+  const outcome = result.result;
+  if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) issues.push("缺少结论");
+  if (!Array.isArray(result.interpretation) || !Array.isArray(result.recommendations)) {
+    issues.push("解释和建议必须是列表");
+  }
+  if (!result.reportContent || result.reportContent.format !== "view-model+sections") {
+    issues.push("报告快照格式不对");
+  }
+  if (!view) issues.push("缺少视图");
+  const raw = JSON.stringify(result.reportContent || {});
+  if (/data:(image|application\/pdf)|<!doctype|<html/i.test(raw)) issues.push("不能保存图片、PDF 或 HTML");
+
+  const extension = result.extensionData;
+  if (!extension || typeof extension !== "object" || Array.isArray(extension)) {
+    issues.push("缺少扩展数据");
+  } else {
+    for (const key of Object.keys(extension)) {
+      if (!ROOT_EXTENSION_KEYS.has(key)) issues.push(`不能保存额外字段 extensionData.${key}`);
+    }
+  }
+  const consent = extension && extension.consent;
+  if (!consent || consent.agreed !== true) issues.push("未同意不能保存");
+  if (consent && consent.version !== ROOT_CONSENT_VERSION) issues.push("同意文案版本不对");
+  const scopes = consent && consent.scopes;
+  if (!Array.isArray(scopes) || !scopes.includes("store") || !scopes.includes("share_link")) {
+    issues.push("同意范围不足");
+  } else if (scopes.some((scope) => !ROOT_SCOPES.includes(scope))) {
+    issues.push("同意范围不能包含档案或电话");
+  }
+  const attribution = extension && extension.attribution;
+  if (attribution && typeof attribution === "object") {
+    for (const key of Object.keys(attribution)) {
+      if (ROOT_ARCHIVE_KEY.test(key)) issues.push(`attribution.${key} 不能保存父母档案`);
+      const value = attribution[key];
+      if (value == null || value === "") continue;
+      if (typeof value !== "string" || Array.from(value).length > 40) issues.push(`${key} 太长`);
+    }
+  }
+  const rushed = view && view.rushed;
+  if (typeof rushed !== "boolean" || !sameValue(extension && extension.quality, { rushed })) {
+    issues.push("作答速度标记不一致");
+  }
+  if (answersOk && developmentOk && typeof rushed === "boolean") {
+    let parts = null;
+    try {
+      parts = rootBodyParts(answers, developmentAnswers, rushed);
+    } catch {
+      parts = null;
+    }
+    if (!parts) issues.push("作答需要 33 道 1–5 的整数题（28 项能力 + 5 道家庭氛围）");
+    else {
+      if (!sameValue(result.dimensions, parts.dimensions)) issues.push("维度与作答不一致");
+      if (!sameValue(result.result, parts.result)) issues.push("结论与作答不一致");
+      if (!sameValue(result.interpretation, parts.interpretation)) issues.push("解释与作答不一致");
+      if (!sameValue(result.recommendations, parts.recommendations)) issues.push("建议与作答不一致");
+      if (!sameValue(result.reportContent, parts.reportContent)) issues.push("视图与作答不一致");
+      if (!sameValue(extension && extension.score, parts.score)) issues.push("扩展分数与作答不一致");
+      if (!sameValue(extension && extension.answers, answers)) issues.push("扩展作答与视图不一致");
+      if (!sameValue(extension && extension.developmentAnswers, developmentAnswers)) {
+        issues.push("扩展发展题与视图不一致");
+      }
+    }
+  }
+  const compat = extension && extension.compat;
+  if (!compat || compat.level !== "partial") issues.push("寻根之旅这一期按部分兼容保存");
+  if (!compat || !Array.isArray(compat.gaps) || !compat.gaps.includes(ROOT_READER_GAP)) {
+    issues.push("阅读页缺口说明不完整");
+  }
+
+  const source = result.source;
+  if (!source || source.origin !== "external-repo" || source.repo !== "root-journey-web" || source.path !== "index.html") {
+    issues.push("来源不对");
+  }
+  if (!source || !SUBMISSION_RE.test(String(source.clientSubmissionId || ""))) issues.push("提交号格式不对");
+  if (source && source.resultKitId !== "root") issues.push("resultKit 标识不对");
+  return issues;
+}
+
 export function validateAssessmentResult(result) {
   if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  if (!ALLOWED_ASSESSMENT_IDS.includes(result.assessmentId)) return ["测评不在可保存范围内"];
   if (result.assessmentId === "sefs") return validateSefsResult(result);
   if (result.assessmentId === "star") return validateStarResult(result);
   if (result.assessmentId === "scl90") return validateScl90Result(result);
   if (result.assessmentId === "pdq4") return validatePdq4Result(result);
   if (result.assessmentId === "ecr") return validateEcrResult(result);
+  if (result.assessmentId === "root") return validateRootResult(result);
   return ["测评不在可保存范围内"];
 }

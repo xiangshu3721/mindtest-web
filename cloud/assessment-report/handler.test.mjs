@@ -12,13 +12,15 @@ import { scorePdq4 as cloudScorePdq4 } from "./vendor/pdq4-score.mjs";
 import { scorePdq4 as pageScorePdq4 } from "../../pdq/js/score.js";
 import { buildEcrResult } from "./vendor/ecr-payload.mjs";
 import { scoreEcr as cloudScoreEcr } from "./vendor/ecr-score.mjs";
+import { buildRootResult } from "./vendor/root-payload.mjs";
+import { scoreRoot } from "./vendor/root-score.mjs";
 import { REVERSE_ITEMS as ECR_REVERSE_ITEMS } from "../../ecr/js/data.js";
 import { scoreEcr as pageScoreEcr } from "../../ecr/js/score.js";
 import { createHandler } from "./lib/handler.mjs";
 import { validateAssessmentResult } from "./lib/validate.mjs";
 import { createCloudBaseStore, createMemoryStore, tableSql } from "./lib/store.mjs";
 import { buildGithubShareUrl, createFeishuHttpWriter, createFeishuIndex, feishuLiveReady, MIRROR_FIELDS, TABLE_NAME } from "./lib/feishu.mjs";
-import { assertDevCollection, randomSecret } from "./lib/ids.mjs";
+import { ALLOWED_ASSESSMENT_IDS, assertDevCollection, randomSecret } from "./lib/ids.mjs";
 import { buildImportDraft } from "./lib/import-draft.mjs";
 import { deployBlockReason } from "./index.mjs";
 import { HTTP_ORIGIN, PREVIEW_REPORT_BASE } from "./lib/preview.mjs";
@@ -1347,4 +1349,231 @@ test("其他测评页面没有接上云端块", async () => {
     assert.equal(text.includes("cloud-kit"), false);
     assert.equal(text.includes("star-cloud"), false);
   }
+});
+
+function rootBody(answers, developmentAnswers, extra = {}, id = ids()) {
+  const payload = buildRootResult({
+    nickname: "小林",
+    answers,
+    developmentAnswers,
+    completedAt: "2026-10-23T09:00:00+08:00",
+    ...extra,
+    ...id,
+  });
+  return { payload, ...id };
+}
+
+test("寻根之旅按三十三题和四道发展题重算后可保存，错误作答或未知测评仍是 422，已放行测评仍可保存", async () => {
+  assert.deepEqual(ALLOWED_ASSESSMENT_IDS, ["star", "sefs", "scl90", "pdq4", "ecr", "root"]);
+  const threes = Array(33).fill(3);
+  const dev = [3, 3, 3, 3];
+  const uniform = scoreRoot(threes);
+  for (const id of ["self_awareness", "autonomy_boundary", "emotion_awareness", "emotional_independence", "listening_understanding", "gentle_expression", "self_worth", "value_realization"]) {
+    assert.equal(uniform.dimensionScores[id], 50);
+  }
+  assert.equal(uniform.contextVariances.self_awareness, "low");
+  assert.equal(uniform.contextVariances.self_worth, "high");
+  assert.deepEqual(uniform.moduleScores, {
+    subjectivity: 50,
+    emotion: 50,
+    relationship: 50,
+    value: 50,
+  });
+  const ones = Array(33).fill(1);
+  assert.equal(scoreRoot(ones).dimensionScores.self_awareness, 31);
+  const climateShift = threes.slice();
+  climateShift[28] = 5;
+  assert.deepEqual(scoreRoot(climateShift).dimensionScores, uniform.dimensionScores);
+
+  assert.equal(rootBody(threes.slice(0, 32), dev).payload, null);
+  assert.equal(rootBody(Array(33).fill(0), dev).payload, null);
+  assert.equal(rootBody(Array(33).fill(6), dev).payload, null);
+  assert.equal(rootBody(threes, dev.slice(0, 3)).payload, null);
+  assert.equal(rootBody(threes, [0, 1, 2, 3]).payload, null);
+  assert.equal(rootBody(threes, dev, { nickname: "13800138000" }).payload, null);
+  assert.equal(rootBody(threes, dev, { nickname: "" }).payload, null);
+
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock" });
+  const { handle, store, logs } = app({ feishu });
+  const made = rootBody(threes, dev, { rushed: true });
+  const wire = JSON.parse(JSON.stringify(made.payload));
+  assert.deepEqual(validateAssessmentResult(made.payload), []);
+  assert.deepEqual(validateAssessmentResult(wire), []);
+  assert.equal(made.payload.assessmentId, "root");
+  assert.equal(made.payload.assessmentVersion, "root-h5-v1");
+  assert.equal(made.payload.assessmentName.includes("寻根"), true);
+  assert.equal(made.payload.assessmentName.includes("生命成长地图"), true);
+  assert.deepEqual(made.payload.dimensions.map((item) => item.id), [
+    "self_awareness",
+    "autonomy_boundary",
+    "emotion_awareness",
+    "emotional_independence",
+    "listening_understanding",
+    "gentle_expression",
+    "self_worth",
+    "value_realization",
+    "subjectivity",
+    "emotion",
+    "relationship",
+    "value",
+  ]);
+  assert.equal(made.payload.dimensions[0].score, 50);
+  assert.equal(made.payload.dimensions[0].levelLabel, "值得关注");
+  assert.equal(made.payload.dimensions[6].extra.contextVariance, "high");
+  assert.equal(made.payload.dimensions[8].score, 50);
+  assert.equal(made.payload.result.headline, "我的生命成长地图");
+  assert.equal(made.payload.result.flags.includes("variance-high:self_worth"), true);
+  assert.equal(made.payload.reportContent.viewModel.rushed, true);
+  assert.equal(made.payload.reportContent.viewModel.familyClimate[0].name, "高期待");
+  assert.equal(made.payload.reportContent.viewModel.familyClimate[0].levelLabel, "一般");
+  assert.deepEqual(made.payload.reportContent.viewModel.development.map((item) => item.id), [
+    "initiative", "identity", "intimacy", "generativity",
+  ]);
+  assert.deepEqual(made.payload.extensionData.score.familyClimate, [3, 3, 3, 3, 3]);
+  assert.equal(made.payload.extensionData.compat.level, "partial");
+  assert.equal(made.payload.source.origin, "external-repo");
+  assert.equal(made.payload.source.repo, "root-journey-web");
+  assert.equal(made.payload.source.path, "index.html");
+  assert.equal(made.payload.source.resultKitId, "root");
+  const named = rootBody(threes, dev);
+  named.payload.assessmentName = "寻根之旅";
+  assert.deepEqual(validateAssessmentResult(named.payload), []);
+  named.payload.assessmentName = "生命成长地图";
+  assert.deepEqual(validateAssessmentResult(named.payload), []);
+  named.payload.assessmentName = "家庭模式";
+  assert.equal(validateAssessmentResult(named.payload).includes("测评名称不对"), true);
+  const oldVersion = rootBody(threes, dev);
+  oldVersion.payload.assessmentVersion = "2.0";
+  assert.equal(validateAssessmentResult(oldVersion.payload).includes("规则版本不对"), true);
+  const archivedConsent = rootBody(threes, dev);
+  archivedConsent.payload.extensionData.consent.scopes = ["store", "share_link", "mentor_read", "journey_archive"];
+  assert.equal(validateAssessmentResult(archivedConsent.payload).includes("同意范围不能包含档案或电话"), true);
+
+  const created = await post({ handle }, "/v1/results", {
+    result: wire, linkSecret: made.linkSecret, ownerToken: made.ownerToken,
+  }, { headers: { origin: "https://xiangshu3721.github.io" }, ip: "203.0.113.140" });
+  assert.equal(created.status, 200);
+  assert.equal(feishu.rows[0]["测评 ID"], "root");
+  assert.equal(feishu.rows[0]["测评名称"].includes("寻根"), true);
+  assert.equal(feishu.rows[0]["测评名称"].includes("生命成长地图"), true);
+  assert.equal(feishu.rows[0]["分享链接"], buildGithubShareUrl(made.reportId, made.linkSecret));
+  assert.equal(JSON.stringify(feishu.rows[0]).includes(JSON.stringify(threes)), false);
+  assert.equal(JSON.stringify(logs).includes(JSON.stringify(threes)), false);
+  const read = await post({ handle }, "/v1/results/read", {
+    reportId: made.reportId, linkSecret: made.linkSecret,
+  }, { ip: "203.0.113.141" });
+  assert.equal(read.status, 200);
+  assert.equal(read.body.assessmentId, "root");
+  assert.equal(read.body.assessmentVersion, "root-h5-v1");
+  assert.equal(read.body.dimensions[0].id, "self_awareness");
+  assert.equal(read.body.dimensions[0].score, 50);
+  assert.equal(read.body.dimensions[8].id, "subjectivity");
+  const revoked = await post({ handle }, "/v1/results/revoke", {
+    reportId: made.reportId, ownerToken: made.ownerToken,
+  }, { ip: "203.0.113.142" });
+  assert.equal(revoked.status, 200);
+
+  const broken = rootBody(threes, dev);
+  broken.payload.dimensions[0].score = 15;
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: broken.payload, linkSecret: broken.linkSecret, ownerToken: broken.ownerToken,
+  }, { ip: "203.0.113.143" })).status, 422);
+
+  const short = rootBody(threes, dev);
+  const shortAnswers = threes.slice(0, 32);
+  short.payload.reportContent.viewModel.answers = shortAnswers;
+  short.payload.extensionData.answers = shortAnswers.slice();
+  const shortResult = await post({ handle }, "/v1/results", {
+    result: short.payload, linkSecret: short.linkSecret, ownerToken: short.ownerToken,
+  }, { ip: "203.0.113.144" });
+  assert.equal(shortResult.status, 422);
+  assert.equal(shortResult.body.issues.includes("作答需要 33 道 1–5 的整数题（28 项能力 + 5 道家庭氛围）"), true);
+
+  const badDev = rootBody(threes, dev);
+  badDev.payload.reportContent.viewModel.developmentAnswers = [1, 2, 3];
+  badDev.payload.extensionData.developmentAnswers = [1, 2, 3];
+  const badDevResult = await post({ handle }, "/v1/results", {
+    result: badDev.payload, linkSecret: badDev.linkSecret, ownerToken: badDev.ownerToken,
+  }, { ip: "203.0.113.145" });
+  assert.equal(badDevResult.status, 422);
+  assert.equal(badDevResult.body.issues.includes("发展题需要 4 道 1–5 的整数题"), true);
+
+  const outOfRange = rootBody(threes, dev);
+  const sixes = Array(33).fill(6);
+  outOfRange.payload.reportContent.viewModel.answers = sixes;
+  outOfRange.payload.extensionData.answers = sixes.slice();
+  const outResult = await post({ handle }, "/v1/results", {
+    result: outOfRange.payload, linkSecret: outOfRange.linkSecret, ownerToken: outOfRange.ownerToken,
+  }, { ip: "203.0.113.146" });
+  assert.equal(outResult.status, 422);
+  assert.equal(outResult.body.issues.includes("作答需要 33 道 1–5 的整数题（28 项能力 + 5 道家庭氛围）"), true);
+
+  const phone = rootBody(threes, dev);
+  phone.payload.extensionData.phone = "13800138000";
+  const phoneResult = await post({ handle }, "/v1/results", {
+    result: phone.payload, linkSecret: phone.linkSecret, ownerToken: phone.ownerToken,
+  }, { ip: "203.0.113.147" });
+  assert.equal(phoneResult.status, 422);
+  assert.equal(phoneResult.body.issues.some((item) => item.includes("不在可保存范围内")), true);
+
+  const parents = rootBody(threes, dev);
+  parents.payload.extensionData.people = { father: { lifeEvents: "父母原文" } };
+  const parentResult = await post({ handle }, "/v1/results", {
+    result: parents.payload, linkSecret: parents.linkSecret, ownerToken: parents.ownerToken,
+  }, { ip: "203.0.113.148" });
+  assert.equal(parentResult.status, 422);
+  assert.equal(parentResult.body.issues.some((item) => item.includes("不能保存父母档案")), true);
+
+  const blocked = rootBody(threes, dev);
+  blocked.payload.assessmentId = "holland";
+  const rejected = await post({ handle }, "/v1/results", {
+    result: blocked.payload, linkSecret: blocked.linkSecret, ownerToken: blocked.ownerToken,
+  }, { ip: "203.0.113.149" });
+  assert.equal(rejected.status, 422);
+  assert.equal(rejected.body.issues.includes("测评不在可保存范围内"), true);
+  assert.equal(validateAssessmentResult(blocked.payload).includes("测评不在可保存范围内"), true);
+
+  const star = result();
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: star.payload, linkSecret: star.linkSecret, ownerToken: star.ownerToken,
+  }, { ip: "203.0.113.150" })).status, 200);
+  const sefsAnswers = Array(24).fill(0);
+  for (let i = 6; i < 12; i += 1) sefsAnswers[i] = 3;
+  const sefs = buildSefsResult({
+    nickname: "小林",
+    answers: sefsAnswers,
+    completedAt: "2026-10-23T09:10:00+08:00",
+    ...ids(),
+  });
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: sefs, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.151" })).status, 200);
+  const scl = buildScl90Result({
+    nickname: "小林",
+    answers: Array(90).fill(1),
+    completedAt: "2026-10-23T09:20:00+08:00",
+    ...ids(),
+  });
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: scl, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.152" })).status, 200);
+  const pdq = buildPdq4Result({
+    nickname: "小林",
+    answers: Array(126).fill(0),
+    completedAt: "2026-10-23T09:30:00+08:00",
+    ...ids(),
+  });
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: pdq, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.153" })).status, 200);
+  const ecr = buildEcrResult({
+    nickname: "小林",
+    answers: Array(36).fill(4),
+    completedAt: "2026-10-23T09:40:00+08:00",
+    ...ids(),
+  });
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: ecr, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.154" })).status, 200);
+  assert.equal(store.size(), 6);
 });
