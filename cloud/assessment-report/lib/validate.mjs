@@ -9,6 +9,19 @@ import {
   pdq4Flags,
   scorePdq4,
 } from "../vendor/pdq4-score.mjs";
+import {
+  DIMENSIONS as ECR_DIMENSIONS,
+  ECR_CONSENT_VERSION,
+  ECR_READER_GAP,
+  ECR_SCREEN_TEXT,
+  ECR_VERSION,
+  QUESTION_COUNT as ECR_QUESTION_COUNT,
+  ecrDimension,
+  ecrFlags,
+  ecrOutcome,
+  ecrViewModel,
+  scoreEcr,
+} from "../vendor/ecr-score.mjs";
 import { REPORT_ID_RE, SECRET_RE, SUBMISSION_RE } from "./ids.mjs";
 
 export const STAR_VERSION = "star-words-31-v1";
@@ -707,11 +720,133 @@ export function validatePdq4Result(result) {
   return issues;
 }
 
+function ecrAnswersOk(list) {
+  return Array.isArray(list)
+    && list.length === ECR_QUESTION_COUNT
+    && list.every((value) => Number.isInteger(value) && value >= 1 && value <= 7);
+}
+
+export function validateEcrResult(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  scanKeys(result, issues, "result");
+  for (const key of Object.keys(result)) {
+    if (!TOP_KEYS.has(key)) issues.push(`不能保存额外字段 ${key}`);
+  }
+  if (!REPORT_ID_RE.test(String(result.reportId || ""))) issues.push("reportId 格式不对");
+  if (result.assessmentId !== "ecr") issues.push("测评不在可保存范围内");
+  const name = String(result.assessmentName || "");
+  if (!name.includes("ECR") || !name.includes("亲密关系经历量表")) issues.push("测评名称不对");
+  if (result.assessmentVersion !== ECR_VERSION) issues.push("规则版本不对");
+  if (result.schemaVersion !== SCHEMA_VERSION) issues.push("协议版本不对");
+  const nick = chars(result.nickname);
+  if (nick.length < 1 || nick.length > 12) issues.push("昵称需要 1–12 个字");
+  if (!Number.isFinite(Date.parse(result.completedAt))) issues.push("完成时间不对");
+
+  const view = result.reportContent && result.reportContent.viewModel;
+  const answers = view && view.answers;
+  const answersOk = ecrAnswersOk(answers);
+  if (!answersOk) issues.push("作答需要 36 道 1–7 的整数题");
+  let scored = null;
+  if (answersOk) {
+    try {
+      scored = scoreEcr(answers);
+    } catch {
+      issues.push("作答需要 36 道 1–7 的整数题");
+    }
+  }
+
+  const dimensions = result.dimensions;
+  if (!Array.isArray(dimensions) || dimensions.length !== 2) issues.push("ECR 需要依恋回避和依恋焦虑");
+  else if (scored) {
+    dimensions.forEach((side, index) => {
+      const dimension = scored.dimensions[index];
+      if (!sameValue(side, ecrDimension(dimension))) issues.push(`${dimension.id} 与作答不一致`);
+    });
+  } else {
+    dimensions.forEach((side, index) => {
+      const dimension = ECR_DIMENSIONS[index];
+      if (!side || side.id !== dimension.id) issues.push(`${dimension.id} 标识不对`);
+    });
+  }
+
+  const outcome = result.result;
+  if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) issues.push("缺少结论");
+  else if (scored) {
+    const expected = ecrOutcome(scored);
+    if (outcome.headline !== expected.headline) issues.push("结论与类型不一致");
+    if (outcome.summary !== expected.summary) issues.push("摘要与类型不一致");
+    if (outcome.code !== expected.code) issues.push("类型码与作答不一致");
+    if (outcome.label !== expected.label) issues.push("结论标签不对");
+    if (!sameValue(outcome.flags, ecrFlags(scored))) issues.push("分数标记与作答不一致");
+  }
+
+  const blocks = []
+    .concat(result.interpretation || [], result.recommendations || [])
+    .map((item) => item && item.text);
+  if (!Array.isArray(result.interpretation) || !Array.isArray(result.recommendations)) {
+    issues.push("解释和建议必须是列表");
+  } else if (!blocks.includes(ECR_SCREEN_TEXT)) {
+    issues.push("筛查说明不完整");
+  }
+  if (!result.reportContent || result.reportContent.format !== "view-model+sections") {
+    issues.push("报告快照格式不对");
+  }
+  if (!view) issues.push("缺少视图");
+  else if (scored && typeof view.rushed === "boolean" && !sameValue(view, ecrViewModel(scored, answers, view.rushed))) {
+    issues.push("视图与作答不一致");
+  }
+  const raw = JSON.stringify(result.reportContent || {});
+  if (/data:(image|application\/pdf)|<!doctype|<html/i.test(raw)) issues.push("不能保存图片、PDF 或 HTML");
+
+  const extension = result.extensionData;
+  const consent = extension && extension.consent;
+  if (!consent || consent.agreed !== true) issues.push("未同意不能保存");
+  if (consent && consent.version !== ECR_CONSENT_VERSION) issues.push("同意文案版本不对");
+  const scopes = consent && consent.scopes;
+  if (!Array.isArray(scopes) || !scopes.includes("store") || !scopes.includes("share_link")) {
+    issues.push("同意范围不足");
+  }
+  if (extension && extension.profile) issues.push("ECR 不保存资料页");
+  const attribution = extension && extension.attribution;
+  if (attribution && typeof attribution === "object") {
+    for (const key of ["mentorId", "activity"]) {
+      if (attribution[key] == null || attribution[key] === "") continue;
+      if (typeof attribution[key] !== "string" || Array.from(attribution[key]).length > 40) {
+        issues.push(`${key} 太长`);
+      }
+    }
+  }
+  const rushed = view && view.rushed;
+  const quality = extension && extension.quality;
+  if (typeof rushed !== "boolean" || !quality || quality.rushed !== rushed) {
+    issues.push("作答速度标记不一致");
+  }
+  if (scored) {
+    if (!sameValue(extension && extension.score, scored)) issues.push("扩展分数与作答不一致");
+    if (!sameValue(extension && extension.answers, answers)) issues.push("扩展作答与视图不一致");
+  }
+  const compat = extension && extension.compat;
+  if (!compat || compat.level !== "partial") issues.push("ECR 这一期按部分兼容保存");
+  if (!compat || !Array.isArray(compat.gaps) || !compat.gaps.includes(ECR_READER_GAP)) {
+    issues.push("阅读页缺口说明不完整");
+  }
+
+  const source = result.source;
+  if (!source || source.origin !== "external-repo" || source.repo !== "mindtest" || source.path !== "ecr/index.html") {
+    issues.push("来源不对");
+  }
+  if (!source || !SUBMISSION_RE.test(String(source.clientSubmissionId || ""))) issues.push("提交号格式不对");
+  if (source && source.resultKitId !== "ecr") issues.push("resultKit 标识不对");
+  return issues;
+}
+
 export function validateAssessmentResult(result) {
   if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
   if (result.assessmentId === "sefs") return validateSefsResult(result);
   if (result.assessmentId === "star") return validateStarResult(result);
   if (result.assessmentId === "scl90") return validateScl90Result(result);
   if (result.assessmentId === "pdq4") return validatePdq4Result(result);
+  if (result.assessmentId === "ecr") return validateEcrResult(result);
   return ["测评不在可保存范围内"];
 }
