@@ -972,7 +972,7 @@ test("ECR 用 scoreEcr 的结果画出类型、两维和四个判别分", () => 
   assert.equal(scored.type.id, "preoccupied");
   assert.equal(html.includes("这份报告的阅读页还没接上"), false);
   assert.equal(html.includes("成人依恋关系测评 ECR"), true);
-  assert.equal(html.includes("<h2 class=\"sefs-name\">专注型</h2>"), true);
+  assert.equal(html.includes("<h1 class=\"sefs-name\">专注型</h1>"), true);
   assert.equal(html.includes(scored.type.short), true);
   assert.equal(html.includes(scored.type.text), true);
   assert.equal(html.includes("2.00 <small>/ 7</small>"), true);
@@ -1032,7 +1032,7 @@ test("ECR 的 viewModel 盖过 extensionData.score，答案不会被拿来重算
   });
   assert.equal(html.includes("自定义类型说明"), true);
   assert.equal(html.includes("自定义短句"), true);
-  assert.equal(html.includes("<h2 class=\"sefs-name\">安全型</h2>"), true);
+  assert.equal(html.includes("<h1 class=\"sefs-name\">安全型</h1>"), true);
   assert.equal(html.includes(scored.type.text), false);
   assert.equal(html.includes("不该用的标题"), false);
   assert.equal(html.includes("不该用的正文"), false);
@@ -1085,7 +1085,7 @@ test("ECR 贴着中点时写出恐惧型，并标出并列或贴近的说明", (
   });
   assert.equal(scored.type.id, "fearful");
   assert.equal(scored.nearMidpoint, true);
-  assert.equal(html.includes("<h2 class=\"sefs-name\">恐惧型</h2>"), true);
+  assert.equal(html.includes("<h1 class=\"sefs-name\">恐惧型</h1>"), true);
   assert.equal(html.includes("4.00 <small>/ 7</small>"), true);
   assert.equal(html.includes("处于中点"), true);
   assert.equal(html.includes("两个均分都贴着中点"), true);
@@ -1165,7 +1165,7 @@ test("寻根之旅用 viewModel 画出四项能力、八个维度、发现和家
   });
   assert.equal(html.includes("这份报告的阅读页还没接上"), false);
   assert.equal(html.includes("寻根之旅 · 生命成长地图"), true);
-  assert.equal(html.includes("<h2 class=\"sefs-name\">我的生命成长地图</h2>"), true);
+  assert.equal(html.includes("<h1 class=\"sefs-name\">我的生命成长地图</h1>"), true);
   assert.equal(html.includes("不该用的标题"), false);
   assert.equal(html.includes("不该用的摘要"), false);
   assert.equal(html.includes("不该用的发现"), false);
@@ -1334,7 +1334,7 @@ test("寻根之旅缺字段显示破折号，答案和半个模块都不编分�
     dimensions: [{ id: "self_awareness", score: 80 }],
     extensionData: { answers: Array(33).fill(5) },
   });
-  const modulesHtml = partial.split("<h2 class=\"sefs-section\">八项生命能力</h2>")[0];
+  const modulesHtml = partial.split("八项生命能力")[0];
   assert.equal(modulesHtml.includes(">80<"), false);
   assert.equal(/<p class="sefs-score">\d/.test(modulesHtml), false);
   assert.equal(partial.includes("80 <small>发展较好</small>"), true);
@@ -1547,27 +1547,39 @@ test("霍兰德兴趣探索画出三字码、六个分数和结构", () => {
   const html = renderReport(report);
   assert.equal(html, renderHollandReport(report));
   assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("小林"), true);
+  assert.equal(html.includes("的兴趣地图"), true);
   assert.equal(html.includes("核心兴趣组合：RIA"), true);
-  assert.equal(html.includes("holland-code"), true);
-  assert.equal(html.includes(">R</span>"), true);
+  assert.equal(html.includes("class=\"radar\""), true);
+  assert.equal(html.includes("rel-hex"), true);
+  assert.equal(html.includes(">R</b>"), true);
+  assert.equal(html.includes("<span class=\"no\">01</span>"), true);
+  assert.equal(html.includes("<span class=\"no\">09</span>"), true);
+  assert.equal(html.includes("我的兴趣组合"), true);
+  assert.equal(html.includes("六个兴趣维度"), true);
+  assert.equal(html.includes("我的兴趣结构"), true);
+  assert.equal(html.includes("怎样的环境让我舒展"), true);
+  assert.equal(html.includes("把它放进生活看看"), true);
+  assert.equal(html.includes("可以体验些什么"), true);
+  assert.equal(html.includes("如果把这张兴趣地图放进工作世界"), true);
   assert.equal(html.includes("实际 R × 研究 I × 艺术 A"), true);
-  assert.equal(html.includes(">80</p>"), true);
-  assert.equal(html.includes("第一兴趣突出"), true);
+  assert.equal(html.includes("dc-score\">80"), true);
+  assert.equal(html.includes("第一兴趣相对突出"), true);
   assert.equal(html.includes("区分清楚"), true);
   assert.equal(html.includes("相邻"), true);
   assert.equal(html.includes("有几个中心"), true);
-  assert.equal(html.includes("暂时的兴趣地图"), true);
+  assert.equal(html.includes("暂时性的兴趣地图"), true);
   assert.equal(html.includes("写信到忘记时间"), true);
-  assert.equal(html.includes("不是职业诊断"), true);
-  assert.equal(html.indexOf(">80</p>") < html.indexOf(">60</p>"), true);
-  assert.equal(html.indexOf(">60</p>") < html.indexOf(">20</p>"), true);
+  assert.equal(html.includes("三个字母代表你当前最突出的三个兴趣方向"), true);
+  assert.equal(html.indexOf("dc-score\">80") < html.indexOf("dc-score\">60"), true);
+  assert.equal(html.indexOf("dc-score\">60") < html.indexOf("dc-score\">20"), true);
 
   const aliased = renderHollandReport({
     assessmentId: "holland",
     extensionData: { score: { hollandCode: "SEC", scores: { social: 70, enterprising: 66, conventional: 40 } } },
   });
-  assert.equal(aliased.includes(">S</span>"), true);
-  assert.equal(aliased.includes(">70</p>"), true);
+  assert.equal(aliased.includes(">S</b>"), true);
+  assert.equal(aliased.includes("dc-score\">70"), true);
   assert.equal(aliased.includes("社会"), true);
 
   const empty = renderHollandReport({ assessmentId: "holland" });
