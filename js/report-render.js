@@ -1490,10 +1490,482 @@ export function renderPdq4Report(report) {
   `;
 }
 
+// ECR 阅读约定：不按 36 题重算。字段对齐即将写入 mindtest ecr/js/cloud-payload.js 的 buildEcrResult。
+// viewModel 优先，其次 result / dimensions，再退到 extensionData.score（scoreEcr 的返回）。
+// 回避、焦虑的 score 或 mean 是 1–7 均分，4 是量表中点。四型用判别分 m，最高的一项是类型。
+// 缺数字留「—」，不补 0，也不用 answers 重算。页上写明筛查不是诊断。
+const ECR_NOTICE = "这是筛查，不是诊断，也不能代替面谈。类型来自回避均分和焦虑均分的判别式，说的是恋爱经历里常常有的感觉，不能据此判断一段关系该不该继续。";
+const ECR_KICKER = "筛查不是诊断。类型是四个判别分里最高的一项，不能代替面谈。";
+const ECR_READER_GAP = "统一阅读页目前只重绘";
+const ECR_DIM_ORDER = ["avoidance", "anxiety"];
+const ECR_DIM_META = {
+  avoidance: {
+    name: "依恋回避",
+    about: "对亲近、依赖、把心里话说出来有多不自在。越高，越倾向于退开。",
+    levels: {
+      low: "低于量表中点。亲近、依赖、把事情讲给恋人，对你相对自在。",
+      mid: "正好落在量表中点。亲近和后退都没有明显偏向。",
+      high: "高于量表中点。太近会紧。你更常把感受留在自己这边，靠着恋人不那么容易。",
+    },
+  },
+  anxiety: {
+    name: "依恋焦虑",
+    about: "对关系会不会失去、对方是不是足够在乎有多担心。越高，越容易不安。",
+    levels: {
+      low: "低于量表中点。关系里的波动，不太会马上变成“我要被抛弃了”。",
+      mid: "正好落在量表中点。担心和放心都没有明显偏向。",
+      high: "高于量表中点。你容易盯着对方还在不在、在不在乎。回应少的时候，不安来得比较快。",
+    },
+  },
+};
+const ECR_LEVELS = { low: "低于中点", mid: "处于中点", high: "高于中点" };
+const ECR_LEVEL_NAME = { 低于中点: "low", 处于中点: "mid", 高于中点: "high" };
+const ECR_DIM_ALIAS = {
+  avoidance: "avoidance",
+  avoidant: "avoidance",
+  avo: "avoidance",
+  回避: "avoidance",
+  依恋回避: "avoidance",
+  anxiety: "anxiety",
+  anxious: "anxiety",
+  anx: "anxiety",
+  焦虑: "anxiety",
+  依恋焦虑: "anxiety",
+};
+const ECR_TYPE_ORDER = ["secure", "fearful", "preoccupied", "dismissing"];
+const ECR_TYPE_META = {
+  secure: {
+    name: "安全型",
+    short: "靠近不觉得别扭，分开也不容易慌。",
+    text: "你比较能把亲近和独立放在一起。需要对方时，依赖不太羞耻；对方暂时不在，也不容易立刻觉得关系要散。心里话说得出口，也不必时时确认对方还爱不爱你。",
+  },
+  fearful: {
+    name: "恐惧型",
+    short: "想靠近，也怕靠太近。",
+    text: "你既希望被靠近，又对太近保持戒备。一边担心被留下，一边在对方真的走近时想退开。关系里容易出现拉近又推开。不是不在乎，而是在乎和防备一起上来。",
+  },
+  preoccupied: {
+    name: "专注型",
+    short: "想靠近，又怕自己不够被在乎。",
+    text: "你愿意靠近，也常常希望靠得更近。对方回应变少、注意不够、或者人不在身边时，不安来得比较快。你会想再确认一次，或者把关系拉紧一点。",
+  },
+  dismissing: {
+    name: "冷漠型",
+    short: "不太怕被丢下，但怕靠得太近。",
+    text: "“会不会被丢掉”不太缠着你，但过度亲近、依赖和掏心会让你不自在。你更习惯自己扛，也更需要一点距离。对方若一直要求更多情绪上的靠近，你会想往后退。",
+  },
+};
+const ECR_TYPE_ALIAS = {
+  secure: "secure",
+  安全型: "secure",
+  fearful: "fearful",
+  fear: "fearful",
+  恐惧型: "fearful",
+  preoccupied: "preoccupied",
+  专注型: "preoccupied",
+  先占型: "preoccupied",
+  dismissing: "dismissing",
+  dismissive: "dismissing",
+  冷漠型: "dismissing",
+  疏离型: "dismissing",
+};
+
+function ecrDimId(raw) {
+  if (!raw || typeof raw !== "object") return "";
+  const id = text(raw.id).toLowerCase();
+  if (ECR_DIM_ALIAS[id]) return ECR_DIM_ALIAS[id];
+  const name = text(raw.name);
+  if (ECR_DIM_ALIAS[name]) return ECR_DIM_ALIAS[name];
+  return "";
+}
+
+function ecrTypeId(raw) {
+  if (!raw || typeof raw !== "object") return "";
+  const id = text(raw.id).toLowerCase().replace(/[\s_-]/g, "");
+  if (ECR_TYPE_ALIAS[id]) return ECR_TYPE_ALIAS[id];
+  const name = text(raw.name);
+  if (ECR_TYPE_ALIAS[name]) return ECR_TYPE_ALIAS[name];
+  return "";
+}
+
+function looksLikeTypeName(value) {
+  const name = text(value);
+  if (!name || name.length > 24 || /[。！？]/.test(name)) return "";
+  if (ECR_TYPE_ALIAS[name] || name.endsWith("型")) return name;
+  return "";
+}
+
+function emptyEcrDim(id) {
+  const meta = ECR_DIM_META[id];
+  return {
+    id,
+    name: meta.name,
+    about: meta.about,
+    score: null,
+    max: 7,
+    sum: null,
+    count: null,
+    level: "",
+    levelLabel: "",
+    narrative: "",
+  };
+}
+
+function emptyEcrType(id) {
+  return {
+    id,
+    name: ECR_TYPE_META[id].name,
+    short: "",
+    text: "",
+    m: null,
+    win: null,
+  };
+}
+
+function ecrLevelId(raw) {
+  const id = text(raw.level).toLowerCase();
+  if (ECR_LEVELS[id]) return id;
+  const label = text(raw.levelLabel);
+  if (ECR_LEVEL_NAME[label]) return ECR_LEVEL_NAME[label];
+  const asLabel = text(raw.level);
+  if (ECR_LEVEL_NAME[asLabel]) return ECR_LEVEL_NAME[asLabel];
+  return "";
+}
+
+function ecrLevelFromMean(mean) {
+  if (mean == null) return "";
+  if (mean < 4) return "low";
+  if (mean > 4) return "high";
+  return "mid";
+}
+
+function applyEcrDim(slots, raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+  const id = ecrDimId(raw);
+  if (!id || !slots.has(id)) return;
+  const slot = slots.get(id);
+  const extra = asObj(raw.extra) || {};
+  const name = text(raw.name);
+  if (name) slot.name = name;
+  const about = text(raw.about) || text(extra.about);
+  if (about) slot.about = about;
+  const mean = num(raw.mean);
+  const score = num(raw.score);
+  const exact = num(raw.exactMean);
+  if (mean != null) slot.score = mean;
+  else if (score != null) slot.score = score;
+  else if (exact != null) slot.score = exact;
+  const sum = num(raw.sum);
+  if (sum != null) slot.sum = sum;
+  const count = num(raw.count);
+  if (count != null) slot.count = count;
+  const max = num(raw.max);
+  if (max != null && max > 0) slot.max = max;
+  const level = ecrLevelId(raw);
+  if (level) slot.level = level;
+  const label = text(raw.levelLabel) || text(extra.levelLabel);
+  if (label) slot.levelLabel = label;
+  const narrative = text(raw.narrative) || text(extra.narrative);
+  if (narrative) slot.narrative = narrative;
+}
+
+function applyEcrDimList(slots, list) {
+  if (!Array.isArray(list)) return;
+  list.forEach((item) => applyEcrDim(slots, item));
+}
+
+function applyNamedEcrDim(slots, id, raw) {
+  const obj = asObj(raw);
+  if (!obj) return;
+  applyEcrDim(slots, { ...obj, id });
+}
+
+function applyEcrType(slots, raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+  const id = ecrTypeId(raw);
+  if (!id || !slots.has(id)) return;
+  const slot = slots.get(id);
+  const name = text(raw.name);
+  if (name) slot.name = name;
+  const short = text(raw.short);
+  if (short) slot.short = short;
+  const body = text(raw.text) || text(raw.narrative);
+  if (body) slot.text = body;
+  if (owns(raw, "m") && num(raw.m) != null) slot.m = num(raw.m);
+  else if (owns(raw, "score") && num(raw.score) != null) slot.m = num(raw.score);
+  else if (num(raw.exactM) != null) slot.m = num(raw.exactM);
+  if (typeof raw.win === "boolean") slot.win = raw.win;
+  else if (typeof raw.winner === "boolean") slot.win = raw.winner;
+}
+
+function applyEcrTypeList(slots, list) {
+  if (!Array.isArray(list)) return;
+  list.forEach((item) => applyEcrType(slots, item));
+}
+
+function packEcrType(raw) {
+  const obj = asObj(raw);
+  if (!obj) return null;
+  const id = ecrTypeId(obj);
+  const name = text(obj.name);
+  const short = text(obj.short);
+  const body = text(obj.text) || text(obj.narrative);
+  if (!id && !name && !short && !body) return null;
+  return { id, name, short, text: body };
+}
+
+function firstBool(values) {
+  for (const value of values) {
+    if (typeof value === "boolean") return value;
+  }
+  return null;
+}
+
+function readEcrQuadrant(sources) {
+  for (const obj of sources) {
+    if (!obj || (!owns(obj, "quadrant") && !owns(obj, "quadrantName"))) continue;
+    const id = ecrTypeId({ id: obj.quadrant, name: obj.quadrantName });
+    const name = text(obj.quadrantName) || (id ? ECR_TYPE_META[id].name : "");
+    return { id, name };
+  }
+  return { id: "", name: "" };
+}
+
+function finishEcrDims(slots) {
+  slots.forEach((slot) => {
+    if (!slot.level) slot.level = ecrLevelFromMean(slot.score);
+    if (!slot.levelLabel && slot.level) slot.levelLabel = ECR_LEVELS[slot.level] || "";
+    if (!slot.narrative && slot.level) slot.narrative = ECR_DIM_META[slot.id].levels[slot.level] || "";
+  });
+}
+
+function finishEcrTypes(types) {
+  const explicit = types.some((type) => typeof type.win === "boolean");
+  if (!explicit && types.some((type) => type.m != null)) {
+    const max = Math.max(...types.map((type) => (type.m == null ? -Infinity : type.m)));
+    types.forEach((type) => {
+      type.win = type.m != null && Math.abs(type.m - max) < 1e-8;
+    });
+    return;
+  }
+  types.forEach((type) => {
+    if (type.win == null) type.win = false;
+  });
+}
+
+function readEcrHeadline(pack, types) {
+  const result = pack.result;
+  const viewType = packEcrType(pack.viewModel.type) || packEcrType(pack.viewScore && pack.viewScore.type);
+  const scoreType = packEcrType(pack.score && pack.score.type);
+  const picked = {
+    id: (viewType && viewType.id) || "",
+    name: (viewType && viewType.name) || "",
+    short: (viewType && viewType.short) || "",
+    text: (viewType && viewType.text) || "",
+  };
+  if (!viewType) {
+    if (!picked.id) {
+      picked.id = ecrTypeId({ id: result.code })
+        || ecrTypeId({ name: result.headline })
+        || ecrTypeId({ name: result.label })
+        || "";
+    }
+    if (!picked.name) picked.name = looksLikeTypeName(result.headline) || looksLikeTypeName(result.label) || "";
+    const label = text(result.label);
+    if (!picked.short && label && label !== picked.name && !label.includes("不是诊断") && !label.includes("筛查")) {
+      picked.short = label;
+    }
+    if (!picked.text) picked.text = text(result.summary);
+    if (scoreType && (!picked.id || !scoreType.id || picked.id === scoreType.id)) {
+      if (!picked.id) picked.id = scoreType.id;
+      if (!picked.name) picked.name = scoreType.name;
+      if (!picked.short) picked.short = scoreType.short;
+      if (!picked.text) picked.text = scoreType.text;
+    }
+  }
+  const winners = types.filter((type) => type.win);
+  if (!picked.name && winners.length) picked.name = winners.map((type) => type.name).join("、");
+  if (!picked.id && winners.length === 1) picked.id = winners[0].id;
+  const slot = picked.id ? types.find((type) => type.id === picked.id) : null;
+  if (slot) {
+    if (!picked.name) picked.name = slot.name;
+    if (!picked.short) picked.short = slot.short;
+    if (!picked.text) picked.text = slot.text;
+  }
+  const ids = winners.length ? winners.map((type) => type.id) : (picked.id ? [picked.id] : []);
+  if (!picked.short && ids.length === 1) picked.short = ECR_TYPE_META[ids[0]].short;
+  if (!picked.short && ids.length > 1) picked.short = "两个类型的判别分相同。";
+  if (!picked.text && ids.length) picked.text = ids.map((id) => ECR_TYPE_META[id].text).join("");
+  if (picked.text && picked.text === picked.short) picked.text = "";
+  return picked;
+}
+
+function ecrBar(slot) {
+  if (slot.score == null) return 0;
+  return Math.max(0, Math.min(100, ((slot.score - 1) / 6) * 100));
+}
+
+function ecrDimArticle(slot) {
+  const levelClass = slot.level ? ` ecr-level-${slot.level}` : "";
+  const foot = slot.count != null && slot.sum != null
+    ? `${showCount(slot.count)} 题合计 ${showCount(slot.sum)}`
+    : (slot.sum != null ? `合计 ${showCount(slot.sum)}` : "");
+  const narrative = slot.narrative && slot.narrative !== slot.about ? slot.narrative : "";
+  return `
+    <article class="sefs-dim">
+      <div class="sefs-dim-head">
+        <h3>${esc(slot.name)}</h3>
+        <p class="sefs-score${levelClass}">${esc(fixed2(slot.score))} <small>/ ${esc(showCount(slot.max))}</small></p>
+      </div>
+      <div class="sefs-track ecr-track" aria-hidden="true">
+        <div class="sefs-fill ecr-fill" style="width:${ecrBar(slot).toFixed(1)}%"></div>
+        <i class="pdq-cut" style="left:50%"></i>
+      </div>
+      <p class="sefs-dim-meta"><span>${esc(slot.about)}</span><span>${esc(slot.levelLabel)}</span></p>
+      ${narrative ? `<p class="scl-narrative">${esc(narrative)}</p>` : ""}
+      ${foot ? `<p class="scl-foot">${esc(foot)}</p>` : ""}
+    </article>
+  `;
+}
+
+function ecrTypeArticle(type) {
+  const mark = type.win ? " · 最高" : "";
+  return `<li class="${type.win ? "ecr-win" : ""}"><span>${esc(type.name)}${esc(mark)}</span><b>${esc(fixed2(type.m))}</b></li>`;
+}
+
+function readEcr(report) {
+  report = report || {};
+  const pack = sourcesOf(report);
+  const dims = new Map(ECR_DIM_ORDER.map((id) => [id, emptyEcrDim(id)]));
+  const typeSlots = new Map(ECR_TYPE_ORDER.map((id) => [id, emptyEcrType(id)]));
+  applyEcrDimList(dims, pack.score && pack.score.dimensions);
+  applyNamedEcrDim(dims, "avoidance", pack.score && pack.score.avoidance);
+  applyNamedEcrDim(dims, "anxiety", pack.score && pack.score.anxiety);
+  applyEcrDimList(dims, report.dimensions);
+  applyNamedEcrDim(dims, "avoidance", pack.viewScore && pack.viewScore.avoidance);
+  applyNamedEcrDim(dims, "anxiety", pack.viewScore && pack.viewScore.anxiety);
+  applyEcrDimList(dims, pack.viewModel.dimensions);
+  applyNamedEcrDim(dims, "avoidance", pack.viewModel.avoidance);
+  applyNamedEcrDim(dims, "anxiety", pack.viewModel.anxiety);
+  finishEcrDims(dims);
+  applyEcrTypeList(typeSlots, pack.score && pack.score.types);
+  applyEcrTypeList(typeSlots, pack.viewScore && pack.viewScore.types);
+  applyEcrTypeList(typeSlots, pack.viewModel.types);
+  const types = ECR_TYPE_ORDER.map((id) => typeSlots.get(id));
+  finishEcrTypes(types);
+  const headline = readEcrHeadline(pack, types);
+  const flagText = Array.isArray(pack.result.flags) ? pack.result.flags.map((flag) => text(flag).toLowerCase()) : [];
+  let tied = firstBool([pack.viewModel.tied, pack.viewScore && pack.viewScore.tied, pack.score && pack.score.tied]);
+  if (tied == null && (flagText.includes("tied") || flagText.includes("tie"))) tied = true;
+  if (tied == null) {
+    const wins = types.filter((type) => type.win).length;
+    if (wins > 1) tied = true;
+    else if (wins === 1) tied = false;
+  }
+  const margin = pickState([pack.viewModel, pack.viewScore, pack.score], ["margin"]);
+  let closeCall = firstBool([pack.viewModel.closeCall, pack.viewScore && pack.viewScore.closeCall, pack.score && pack.score.closeCall]);
+  if (closeCall == null && (flagText.includes("close-call") || flagText.includes("closecall") || flagText.includes("close_call"))) closeCall = true;
+  if (closeCall == null && margin.present && margin.value != null) closeCall = margin.value < 0.5 && tied !== true;
+  const meansReady = ECR_DIM_ORDER.every((id) => dims.get(id).score != null);
+  let nearMidpoint = firstBool([pack.viewModel.nearMidpoint, pack.viewScore && pack.viewScore.nearMidpoint, pack.score && pack.score.nearMidpoint]);
+  if (nearMidpoint == null && (flagText.includes("near-midpoint") || flagText.includes("nearmidpoint"))) nearMidpoint = true;
+  if (nearMidpoint == null && meansReady) {
+    nearMidpoint = ECR_DIM_ORDER.every((id) => Math.abs(dims.get(id).score - 4) < 0.25);
+  }
+  const quadrant = readEcrQuadrant([pack.viewModel, pack.viewScore, pack.score]);
+  let differs = firstBool([
+    pack.viewModel.differsFromQuadrant,
+    pack.viewScore && pack.viewScore.differsFromQuadrant,
+    pack.score && pack.score.differsFromQuadrant,
+  ]);
+  if (differs == null && (flagText.includes("differs") || flagText.includes("differs-from-quadrant"))) differs = true;
+  if (differs == null && quadrant.id && headline.id) differs = quadrant.id !== headline.id;
+  if (differs == null) differs = false;
+  const said = `${headline.short}${headline.text}`;
+  const notes = [];
+  if (tied === true && !said.includes("判别分相同")) notes.push("两个类型的判别分相同，并列写在上面。");
+  else if (closeCall === true && margin.present && margin.value != null && tied !== true) {
+    notes.push(`第一型只比第二型高 ${fixed2(margin.value)} 分。可以当作倾向，不必当成唯一标签。`);
+  }
+  if (nearMidpoint === true) notes.push("两个均分都贴着中点。类型仍然按判别分最高的一项给出，风格并不鲜明。");
+  if (differs === true && quadrant.name && headline.name) {
+    notes.push(`若只按 4 分切成四格，会落到${quadrant.name}。这份量表用判别式，最高的是${headline.name}。`);
+  }
+  const blocks = blocksOf(report.interpretation).concat(blocksOf(report.recommendations))
+    .filter((block) => !block.text.includes("阅读页还没接上") && !block.text.includes(ECR_READER_GAP));
+  const screen = blocks.find((block) => (
+    block.id === "screen" || block.id === "disclaimer" || block.id === "notice"
+    || (block.text.includes("不是诊断") && block.text.includes("不能代替"))
+  ));
+  const notice = screen && screen.text.includes("不能代替") ? screen.text : ECR_NOTICE;
+  const seen = [headline.name, headline.short, headline.text, notice, ECR_KICKER]
+    .concat(notes, [...dims.values()].flatMap((slot) => [slot.about, slot.narrative, slot.levelLabel]))
+    .filter(Boolean);
+  const extra = fresh(blocks
+    .filter((block) => block !== screen)
+    .map((block) => (block.title && block.title !== headline.name ? `${block.title}：${block.text}` : block.text)), seen);
+  const quality = asObj(pack.extension.quality) || {};
+  const rushBag = asObj(pack.viewModel.rush) || asObj(quality.rush);
+  const rushed = quality.rushed === true || quality.tooFast === true
+    || pack.viewModel.rushed === true || pack.viewModel.tooFast === true
+    || (pack.score && (pack.score.rushed === true || pack.score.tooFast === true))
+    || (rushBag && rushBag.tooFast === true);
+  const dimensions = ECR_DIM_ORDER.map((id) => dims.get(id));
+  const anyNumber = dimensions.some((slot) => slot.score != null) || types.some((type) => type.m != null);
+  return {
+    scaleName: text(report.assessmentName) || "成人依恋关系测评 ECR",
+    type: headline,
+    dimensions,
+    types,
+    notes,
+    extra,
+    notice,
+    rushed,
+    empty: !anyNumber,
+    nickname: report.nickname,
+    completedAt: report.completedAt,
+    version: report.assessmentVersion,
+  };
+}
+
+export function renderEcrReport(report) {
+  const model = readEcr(report || {});
+  const heading = model.type.name || model.scaleName;
+  const who = model.type.name ? `<p class="scl-who">${esc(model.scaleName)}</p>` : "";
+  const notes = model.notes.length
+    ? `<section class="sefs-insight">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    : "";
+  const extra = model.extra.length
+    ? `<section class="sefs-insight">${model.extra.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    : "";
+  return `
+    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
+    ${who}
+    <h2 class="sefs-name">${esc(heading)}</h2>
+    <p class="sefs-kicker">${esc(ECR_KICKER)}</p>
+    ${model.type.short ? `<p class="scl-lead">${esc(model.type.short)}</p>` : ""}
+    ${model.type.text ? `<p>${esc(model.type.text)}</p>` : ""}
+    ${model.type.name ? "" : `<p class="state">这份结果里没有可显示的类型。</p>`}
+    ${notes}
+    ${model.rushed ? `<p class="scl-rush"><strong>作答偏快。</strong>超过一半的题目间隔不到 1.5 秒。下面的分数仍然按作答计算。</p>` : ""}
+    ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
+    <h2 class="sefs-section">回避和焦虑</h2>
+    <p class="scl-sub">均分从 1 到 7，4 是量表中点，不是诊断界值。横条上的刻度落在中点。</p>
+    <section class="sefs-dims">${model.dimensions.map(ecrDimArticle).join("")}</section>
+    <h2 class="sefs-section">四个判别分</h2>
+    <p class="scl-sub">回避均分记为 A，焦虑均分记为 B。类型取最高的一项。</p>
+    <ol class="ecr-types">${model.types.map(ecrTypeArticle).join("")}</ol>
+    ${extra}
+    ${model.notice ? `<p class="sefs-notice">${esc(model.notice)}</p>` : ""}
+    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+  `;
+}
+
 export function renderReport(report) {
   if (report && report.assessmentId === "star") return renderStarReport(report);
   if (report && report.assessmentId === "sefs") return renderSefsReport(report);
   if (report && report.assessmentId === "scl90") return renderScl90Report(report);
   if (report && report.assessmentId === "pdq4") return renderPdq4Report(report);
+  if (report && report.assessmentId === "ecr") return renderEcrReport(report);
   return `<p class="state">这份报告的阅读页还没接上。${esc(report && report.assessmentName || "")}</p>`;
 }

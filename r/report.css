@@ -237,6 +237,24 @@ ol, ul { margin: 8px 0 0; padding-left: 1.2em; }
   background: #f6efe4;
 }
 
+.ecr-track { position: relative; overflow: visible; }
+.ecr-fill { background: #6d8f86; }
+.ecr-level-low { color: #1d6a3a; }
+.ecr-level-mid { color: var(--muted); }
+.ecr-level-high { color: #9b5b3c; }
+.ecr-types { list-style: none; margin: 4px 0 0; padding: 0; }
+.ecr-types li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid #e6ddd4;
+}
+.ecr-types span { min-width: 0; font-family: var(--serif); font-size: 18px; }
+.ecr-types b { flex: none; font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ecr-win span { color: #6b3a45; }
+
 @media (max-width: 640px) {
   .sheet { padding: 24px 16px; }
   .roster { grid-template-columns: 1fr; }
