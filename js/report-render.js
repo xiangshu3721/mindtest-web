@@ -1961,11 +1961,708 @@ export function renderEcrReport(report) {
   `;
 }
 
+// 寻根之旅 · 生命成长地图阅读约定：不按 33 题重算。assessmentId 必须是 root。
+// 云端 assessmentVersion 是 root-h5-v1；页面上的「2.0」或其他版本只照字段展示，不报错。
+// viewModel 优先（abilities / modules / familyClimate），其次 dimensions / result，再退到 extensionData.score。
+// 八项能力在前，四个模块 id 是 subjectivity、emotion、relationship、value。分数多在 15–92，max 100。
+// 模块分用显式 score；都没有时，才用该模块下两个能力分的四舍五入平均数。
+// 状态优先 levelLabel，其次 level（strong / good / stable / room / watch / focus / explore）。没有分数就留「—」，不补 0。
+// 关键发现用 findings 或 result.summary，不从高低分现编。家庭氛围可在 viewModel，也可在 extensionData.score.familyClimate。
+// 1–5 分换成「很少 / 较少 / 一般 / 较明显 / 明显」。不读 answers，也不把长度超过 5 的数字数组当成氛围。
+const ROOT_NOTICE = "自我探索，不是医学或心理诊断。";
+const ROOT_SCALE = "寻根之旅 · 生命成长地图";
+const ROOT_READER_GAP = "尚未重绘";
+const ROOT_MODULE_ORDER = ["subjectivity", "emotion", "relationship", "value"];
+const ROOT_MODULE_META = {
+  subjectivity: { name: "主体性", dimIds: ["self_awareness", "autonomy_boundary"], about: "主体性看你如何认识自己，并守住自己的选择。" },
+  emotion: { name: "情感力", dimIds: ["emotion_awareness", "emotional_independence"], about: "情感力看你如何觉察情绪，并在关系里回到自己的生活。" },
+  relationship: { name: "关系力", dimIds: ["listening_understanding", "gentle_expression"], about: "关系力看你如何听懂别人，并真实、有边界地表达。" },
+  value: { name: "价值力", dimIds: ["self_worth", "value_realization"], about: "价值力看你如何感受自身价值，并把它做成现实里的事。" },
+};
+const ROOT_MODULE_ALIAS = {
+  subjectivity: "subjectivity",
+  agency: "subjectivity",
+  subject: "subjectivity",
+  zhuti: "subjectivity",
+  主体性: "subjectivity",
+  emotion: "emotion",
+  emotional: "emotion",
+  emotionforce: "emotion",
+  qinggan: "emotion",
+  情感力: "emotion",
+  relationship: "relationship",
+  relation: "relationship",
+  relations: "relationship",
+  guanxi: "relationship",
+  关系力: "relationship",
+  value: "value",
+  values: "value",
+  valueforce: "value",
+  jiazhi: "value",
+  价值力: "value",
+};
+const ROOT_DIM_ORDER = [
+  "self_awareness",
+  "autonomy_boundary",
+  "emotion_awareness",
+  "emotional_independence",
+  "listening_understanding",
+  "gentle_expression",
+  "self_worth",
+  "value_realization",
+];
+const ROOT_DIM_META = {
+  self_awareness: { name: "自我认知", module: "主体性", about: "了解自己是谁、真正想要什么，并能够辨认自己的需要与价值取向。" },
+  autonomy_boundary: { name: "自主边界", module: "主体性", about: "能够为自己做选择并承担责任，同时区分自己与他人的需要、情绪与责任。" },
+  emotion_awareness: { name: "情绪觉察", module: "情感力", about: "能够感知、辨认并理解自己的情绪，以及情绪背后正在发生什么。" },
+  emotional_independence: { name: "情感独立", module: "情感力", about: "在重要关系中既能够保持连接，也能够维持自己的判断、生活重心和内在稳定。" },
+  listening_understanding: { name: "倾听理解", module: "关系力", about: "能够暂时放下自己的立场，理解他人的观点、感受、需要与行为。" },
+  gentle_expression: { name: "柔和表达", module: "关系力", about: "能够真实而有边界地表达自己，并在分歧和冲突中促进理解与修复。" },
+  self_worth: { name: "自我价值感", module: "价值力", about: "对自身价值具有相对稳定的感受，不完全依赖成绩、身份或他人认可。" },
+  value_realization: { name: "价值实现力", module: "价值力", about: "能够识别自己的能力与价值，并逐步将其转化为行动、贡献与现实结果。" },
+};
+const ROOT_DIM_ALIAS = {
+  self_awareness: "self_awareness",
+  selfawareness: "self_awareness",
+  自我认知: "self_awareness",
+  autonomy_boundary: "autonomy_boundary",
+  autonomyboundary: "autonomy_boundary",
+  boundary: "autonomy_boundary",
+  自主边界: "autonomy_boundary",
+  emotion_awareness: "emotion_awareness",
+  emotionawareness: "emotion_awareness",
+  情绪觉察: "emotion_awareness",
+  emotional_independence: "emotional_independence",
+  emotionalindependence: "emotional_independence",
+  情感独立: "emotional_independence",
+  listening_understanding: "listening_understanding",
+  listeningunderstanding: "listening_understanding",
+  listening: "listening_understanding",
+  倾听理解: "listening_understanding",
+  gentle_expression: "gentle_expression",
+  gentleexpression: "gentle_expression",
+  expression: "gentle_expression",
+  柔和表达: "gentle_expression",
+  self_worth: "self_worth",
+  selfworth: "self_worth",
+  worth: "self_worth",
+  自我价值感: "self_worth",
+  value_realization: "value_realization",
+  valuerealization: "value_realization",
+  realization: "value_realization",
+  价值实现力: "value_realization",
+};
+const ROOT_CLIMATE_ORDER = ["high_expectation", "emotional_suppression", "control_intervention", "criticism", "warmth"];
+const ROOT_CLIMATE_META = {
+  high_expectation: { name: "高期待" },
+  emotional_suppression: { name: "情感压抑" },
+  control_intervention: { name: "控制干预" },
+  criticism: { name: "批评指责" },
+  warmth: { name: "温暖支持" },
+};
+const ROOT_LEVEL_LABEL = {
+  strong: "优势明显",
+  good: "发展较好",
+  stable: "较为稳定",
+  room: "有提升空间",
+  watch: "值得关注",
+  focus: "当前成长重点",
+  explore: "值得深入探索",
+};
+const ROOT_CLIMATE_ALIAS = {
+  high_expectation: "high_expectation",
+  highexpectation: "high_expectation",
+  expectation: "high_expectation",
+  expectations: "high_expectation",
+  高期待: "high_expectation",
+  emotional_suppression: "emotional_suppression",
+  emotionalsuppression: "emotional_suppression",
+  suppression: "emotional_suppression",
+  情感压抑: "emotional_suppression",
+  control: "control_intervention",
+  control_intervention: "control_intervention",
+  controlintervention: "control_intervention",
+  intervention: "control_intervention",
+  控制干预: "control_intervention",
+  criticism: "criticism",
+  criticism_blame: "criticism",
+  blame: "criticism",
+  批评指责: "criticism",
+  warmth: "warmth",
+  warmth_support: "warmth",
+  support: "warmth",
+  温暖支持: "warmth",
+};
+const ROOT_CLIMATE_LABELS = ["很少", "较少", "一般", "较明显", "明显"];
+const ROOT_FINDING_KEYS = ["findings", "keyFindings", "key_findings", "keyFinding"];
+const ROOT_CLIMATE_KEYS = ["familyClimate", "familyClimates", "climates", "climate"];
+
+function aliasLookup(table, value) {
+  const raw = text(value);
+  if (!raw) return "";
+  if (Object.prototype.hasOwnProperty.call(table, raw)) return table[raw];
+  const keyed = raw.toLowerCase().replace(/[\s-]+/g, "_");
+  if (Object.prototype.hasOwnProperty.call(table, keyed)) return table[keyed];
+  const compact = keyed.replace(/_/g, "");
+  if (Object.prototype.hasOwnProperty.call(table, compact)) return table[compact];
+  return "";
+}
+
+function rootModuleId(raw) {
+  if (typeof raw === "string") return aliasLookup(ROOT_MODULE_ALIAS, raw);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "";
+  return aliasLookup(ROOT_MODULE_ALIAS, raw.id) || aliasLookup(ROOT_MODULE_ALIAS, raw.name);
+}
+
+function rootDimId(raw) {
+  if (typeof raw === "string") return aliasLookup(ROOT_DIM_ALIAS, raw);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "";
+  return aliasLookup(ROOT_DIM_ALIAS, raw.id) || aliasLookup(ROOT_DIM_ALIAS, raw.name);
+}
+
+function rootClimateId(raw) {
+  const direct = aliasLookup(ROOT_CLIMATE_ALIAS, raw);
+  if (direct) return direct;
+  const name = text(raw);
+  if (!name) return "";
+  const tail = name.split(/[-–—]/).pop();
+  if (tail && tail !== name) return aliasLookup(ROOT_CLIMATE_ALIAS, tail);
+  return "";
+}
+
+function rootStatus(score) {
+  if (score == null) return "";
+  if (score >= 85) return "优势明显";
+  if (score >= 75) return "发展较好";
+  if (score >= 65) return "较为稳定";
+  if (score >= 55) return "有提升空间";
+  if (score >= 45) return "值得关注";
+  if (score >= 35) return "当前成长重点";
+  return "值得深入探索";
+}
+
+function statusText(value) {
+  const raw = text(value);
+  if (!raw || raw.length > 24) return "";
+  if (/[。！？]/.test(raw)) return "";
+  if (raw === "—" || raw === "-" || raw === "－") return "";
+  return raw;
+}
+
+function rootStatusLabel(value) {
+  const raw = statusText(value);
+  if (!raw) return "";
+  return ROOT_LEVEL_LABEL[raw.toLowerCase()] || raw;
+}
+
+function showScore(value) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const rounded = Math.round(value * 100) / 100;
+  return String(rounded);
+}
+
+function versionText(value) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
+function emptyRootModule(id) {
+  const meta = ROOT_MODULE_META[id];
+  return { id, name: meta.name, about: meta.about, score: null, max: 100, status: "", dimIds: meta.dimIds };
+}
+
+function emptyRootDim(id) {
+  const meta = ROOT_DIM_META[id];
+  return { id, name: meta.name, module: meta.module, about: meta.about, score: null, max: 100, status: "" };
+}
+
+function emptyRootClimate(id) {
+  return { id, name: ROOT_CLIMATE_META[id].name, score: null, label: "" };
+}
+
+function rootScoreOf(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  const keys = ["score", "mean", "value"];
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = keys[i];
+    if (!owns(obj, key)) continue;
+    if (key === "value" && typeof obj.value !== "number" && typeof obj.value !== "string") continue;
+    const score = num(obj[key]);
+    if (score != null) return score;
+  }
+  return null;
+}
+
+function applyRootModule(slots, raw) {
+  if (raw == null) return;
+  const obj = typeof raw === "number" || typeof raw === "string" ? { score: raw } : asObj(raw);
+  if (!obj) return;
+  const id = rootModuleId(obj);
+  if (!id || !slots.has(id)) return;
+  const slot = slots.get(id);
+  const name = text(obj.name);
+  if (name && !rootModuleId(name)) slot.name = name;
+  const score = rootScoreOf(obj);
+  const status = rootStatusLabel(obj.status) || rootStatusLabel(obj.levelLabel) || rootStatusLabel(obj.level);
+  if (score != null) {
+    if (slot.score !== score && !status) slot.status = "";
+    slot.score = score;
+  }
+  if (status) slot.status = status;
+  const max = num(obj.max);
+  if (max != null && max > 0) slot.max = max;
+  const about = text(obj.narrative) || text(obj.about) || text(obj.explanation);
+  if (about) slot.about = about;
+}
+
+function applyRootModuleMap(slots, map) {
+  const obj = asObj(map);
+  if (!obj) return;
+  Object.keys(obj).forEach((key) => {
+    const id = rootModuleId(key);
+    if (!id) return;
+    const value = obj[key];
+    if (typeof value === "number" || typeof value === "string") {
+      applyRootModule(slots, { id, score: value });
+      return;
+    }
+    const raw = asObj(value);
+    if (!raw) return;
+    applyRootModule(slots, { ...raw, id: raw.id || id });
+  });
+}
+
+function applyRootModuleList(slots, list) {
+  if (!Array.isArray(list)) return;
+  const positional = list.length === ROOT_MODULE_ORDER.length
+    && list.every((item) => item == null || typeof item === "number" || typeof item === "string" || (asObj(item) && !rootModuleId(item)));
+  list.forEach((item, index) => {
+    if (item == null) return;
+    if (positional) {
+      const id = ROOT_MODULE_ORDER[index];
+      if (typeof item === "number" || typeof item === "string") applyRootModule(slots, { id, score: item });
+      else applyRootModule(slots, { ...item, id });
+      return;
+    }
+    applyRootModule(slots, item);
+  });
+}
+
+function applyRootNamedModules(slots, bag) {
+  if (!bag) return;
+  ROOT_MODULE_ORDER.forEach((id) => {
+    const name = ROOT_MODULE_META[id].name;
+    if (owns(bag, id)) applyRootModule(slots, namedRootValue(bag[id], id));
+    if (owns(bag, name)) applyRootModule(slots, namedRootValue(bag[name], id));
+  });
+}
+
+function namedRootValue(value, id) {
+  if (typeof value === "number" || typeof value === "string") return { id, score: value };
+  const obj = asObj(value);
+  if (!obj) return null;
+  return { ...obj, id: obj.id || id };
+}
+
+function applyRootDim(slots, raw) {
+  const obj = asObj(raw);
+  if (!obj) return;
+  const id = rootDimId(obj);
+  if (!id || !slots.has(id)) return;
+  const slot = slots.get(id);
+  const extra = asObj(obj.extra) || {};
+  const name = text(obj.name);
+  if (name && !rootDimId(name)) slot.name = name;
+  const direct = rootScoreOf(obj);
+  const score = direct != null ? direct : rootScoreOf(extra);
+  const status = rootStatusLabel(obj.status) || rootStatusLabel(obj.levelLabel) || rootStatusLabel(obj.level)
+    || rootStatusLabel(extra.status) || rootStatusLabel(extra.levelLabel);
+  if (score != null) {
+    if (slot.score !== score && !status) slot.status = "";
+    slot.score = score;
+  }
+  if (status) slot.status = status;
+  const max = num(obj.max);
+  if (max != null && max > 0) slot.max = max;
+  const about = text(obj.narrative) || text(obj.explanation) || text(obj.about) || text(obj.brief)
+    || text(extra.narrative) || text(extra.explanation) || text(extra.about);
+  if (about) slot.about = about;
+  const moduleName = text(obj.module) || text(obj.moduleId) || text(extra.module) || text(extra.moduleId);
+  if (moduleName) {
+    const moduleId = rootModuleId(moduleName);
+    slot.module = moduleId ? ROOT_MODULE_META[moduleId].name : moduleName;
+  }
+}
+
+function applyRootDimMap(slots, map) {
+  const obj = asObj(map);
+  if (!obj) return;
+  Object.keys(obj).forEach((key) => {
+    const id = rootDimId(key);
+    if (!id) return;
+    const value = obj[key];
+    if (typeof value === "number" || typeof value === "string") {
+      applyRootDim(slots, { id, score: value });
+      return;
+    }
+    const raw = asObj(value);
+    if (!raw) return;
+    applyRootDim(slots, { ...raw, id: raw.id || id });
+  });
+}
+
+function applyRootStatusMap(slots, map) {
+  const obj = asObj(map);
+  if (!obj) return;
+  Object.keys(obj).forEach((key) => {
+    const id = rootDimId(key);
+    if (!id || !slots.has(id)) return;
+    const value = obj[key];
+    const packed = asObj(value);
+    const status = rootStatusLabel(value) || rootStatusLabel(packed && (packed.status || packed.levelLabel || packed.level || packed.label));
+    if (status) slots.get(id).status = status;
+  });
+}
+
+function applyRootDimList(slots, list) {
+  if (!Array.isArray(list)) return;
+  const recognized = list.some((item) => rootDimId(item));
+  const positional = !recognized && list.length === ROOT_DIM_ORDER.length;
+  list.forEach((item, index) => {
+    if (item == null) return;
+    if (positional) {
+      const id = ROOT_DIM_ORDER[index];
+      if (typeof item === "number" || typeof item === "string") applyRootDim(slots, { id, score: item });
+      else if (asObj(item)) applyRootDim(slots, { ...item, id: item.id || id });
+      return;
+    }
+    applyRootDim(slots, item);
+  });
+}
+
+function applyRootScoreArray(slots, list) {
+  if (!Array.isArray(list) || list.length !== ROOT_DIM_ORDER.length) return;
+  if (list.some((item) => item && typeof item === "object")) return;
+  list.forEach((item, index) => {
+    const score = num(item);
+    if (score == null) return;
+    const slot = slots.get(ROOT_DIM_ORDER[index]);
+    if (slot.score !== score) slot.status = "";
+    slot.score = score;
+  });
+}
+
+function applyRootNamedDims(slots, bag) {
+  if (!bag) return;
+  ROOT_DIM_ORDER.forEach((id) => {
+    const name = ROOT_DIM_META[id].name;
+    if (owns(bag, id)) applyRootDim(slots, namedRootValue(bag[id], id));
+    if (owns(bag, name)) applyRootDim(slots, namedRootValue(bag[name], id));
+  });
+}
+
+function applyRootDimBag(slots, bag) {
+  if (!bag) return;
+  applyRootScoreArray(slots, bag.scores);
+  applyRootDimList(slots, bag.dimensions);
+  applyRootDimMap(slots, bag.dimensionScores);
+  applyRootNamedDims(slots, bag);
+  applyRootDimList(slots, bag.abilities);
+  applyRootStatusMap(slots, bag.dimensionStatuses);
+}
+
+function applyRootModuleBag(slots, bag) {
+  if (!bag) return;
+  applyRootModuleMap(slots, bag.moduleScores);
+  applyRootModuleList(slots, bag.modules);
+  applyRootNamedModules(slots, bag);
+}
+
+function climateLabelFromScore(score) {
+  if (score == null || !Number.isFinite(score)) return "";
+  const rounded = Math.round(score);
+  if (Math.abs(score - rounded) > 1e-8) return "";
+  if (rounded < 1 || rounded > 5) return "";
+  return ROOT_CLIMATE_LABELS[rounded - 1];
+}
+
+function applyRootClimate(slots, raw, indexHint) {
+  if (typeof raw === "number" || typeof raw === "string") {
+    if (!Number.isInteger(indexHint) || indexHint < 0 || indexHint >= ROOT_CLIMATE_ORDER.length) return;
+    const slot = slots.get(ROOT_CLIMATE_ORDER[indexHint]);
+    const score = num(raw);
+    if (score != null) slot.score = score;
+    else if (text(raw)) slot.label = text(raw);
+    return;
+  }
+  const obj = asObj(raw);
+  if (!obj) return;
+  let id = rootClimateId(obj.id) || rootClimateId(obj.name) || rootClimateId(obj.key);
+  if (!id && Number.isInteger(indexHint) && indexHint >= 0 && indexHint < ROOT_CLIMATE_ORDER.length) {
+    id = ROOT_CLIMATE_ORDER[indexHint];
+  }
+  if (!id || !slots.has(id)) return;
+  const slot = slots.get(id);
+  const name = text(obj.name);
+  if (name && !rootClimateId(name)) slot.name = name;
+  const score = rootScoreOf(obj);
+  if (score != null) slot.score = score;
+  const label = text(obj.label) || text(obj.levelLabel) || statusText(obj.level) || text(obj.text);
+  if (label && label !== slot.name && !rootClimateId(label)) slot.label = label;
+}
+
+function finishRootClimate(slot) {
+  if (!slot.label) slot.label = climateLabelFromScore(slot.score);
+}
+
+function readRootClimates(raw) {
+  if (raw == null || typeof raw === "boolean") return null;
+  const slots = new Map(ROOT_CLIMATE_ORDER.map((id) => [id, emptyRootClimate(id)]));
+  if (Array.isArray(raw)) {
+    const answerVector = raw.length > ROOT_CLIMATE_ORDER.length
+      && raw.every((item) => item == null || typeof item === "number" || typeof item === "string");
+    if (answerVector) return null;
+    raw.forEach((item, index) => applyRootClimate(slots, item, index));
+  } else if (asObj(raw)) {
+    Object.keys(raw).forEach((key) => {
+      const id = rootClimateId(key);
+      const value = raw[key];
+      if (id && (typeof value === "number" || typeof value === "string")) {
+        applyRootClimate(slots, { id, score: num(value), label: num(value) == null ? text(value) : "" }, -1);
+        return;
+      }
+      const obj = asObj(value);
+      if (obj) applyRootClimate(slots, { ...obj, id: obj.id || id || key, name: obj.name || (id ? ROOT_CLIMATE_META[id].name : key) }, -1);
+      else if (id) applyRootClimate(slots, { id }, -1);
+    });
+  } else {
+    return null;
+  }
+  const items = ROOT_CLIMATE_ORDER.map((id) => {
+    const slot = slots.get(id);
+    finishRootClimate(slot);
+    return slot;
+  });
+  const any = items.some((item) => item.label || item.score != null);
+  if (!any && !Array.isArray(raw)) return null;
+  return items;
+}
+
+function ownedClimate(bag) {
+  if (!bag) return undefined;
+  const key = ROOT_CLIMATE_KEYS.find((name) => owns(bag, name));
+  if (!key) return undefined;
+  return bag[key];
+}
+
+function readFindingList(raw) {
+  if (raw == null) return [];
+  if (typeof raw === "string") return text(raw) ? [text(raw)] : [];
+  if (Array.isArray(raw)) {
+    return raw.map((item) => {
+      if (typeof item === "string") return text(item);
+      const obj = asObj(item);
+      if (!obj) return "";
+      const body = text(obj.text) || text(obj.body) || text(obj.x) || text(obj.summary);
+      const title = text(obj.title);
+      if (title && body && title !== body) return `${title}：${body}`;
+      return body || title;
+    }).filter(Boolean);
+  }
+  const obj = asObj(raw);
+  if (!obj) return [];
+  const body = text(obj.text) || text(obj.body) || text(obj.x) || text(obj.summary);
+  const title = text(obj.title);
+  if (title && body && title !== body) return [`${title}：${body}`];
+  return body || title ? [body || title] : [];
+}
+
+function findingsFrom(bag) {
+  if (!bag) return null;
+  const key = ROOT_FINDING_KEYS.find((name) => owns(bag, name));
+  const summary = text(bag.summary);
+  if (!key && !summary) return null;
+  const lines = key ? readFindingList(bag[key]) : [];
+  if (summary && !lines.some((line) => line === summary || line.includes(summary))) lines.push(summary);
+  return lines;
+}
+
+function rootSkipBlock(block) {
+  if (!block) return true;
+  if (block.id === "disclaimer" || block.id === "notice" || block.id === "screen" || block.id === "reader" || block.id === "climate") return true;
+  if (rootDimId(block.id) || rootModuleId(block.id)) return true;
+  if (block.text.includes("不是医学或心理诊断")) return true;
+  if (block.text.includes(ROOT_READER_GAP) || block.text.includes("阅读页还没接上") || block.text.includes("尚未重绘")) return true;
+  return false;
+}
+
+function rootRushed(bags) {
+  for (const bag of bags) {
+    if (!bag) continue;
+    if (typeof bag.rushed === "boolean") return bag.rushed;
+    if (typeof bag.tooFast === "boolean") return bag.tooFast;
+    const quality = asObj(bag.quality);
+    if (quality && (typeof quality.rushed === "boolean" || typeof quality.tooFast === "boolean")) {
+      return quality.rushed === true || quality.tooFast === true;
+    }
+  }
+  return false;
+}
+
+function rootBar(slot) {
+  if (slot.score == null) return 0;
+  const max = slot.max != null && slot.max > 0 ? slot.max : 100;
+  return Math.max(0, Math.min(100, (slot.score / max) * 100));
+}
+
+function readRoot(report) {
+  report = report && typeof report === "object" ? report : {};
+  let pack;
+  try {
+    pack = sourcesOf(report);
+  } catch {
+    pack = { viewModel: {}, viewScore: null, score: null, extension: {}, result: {} };
+  }
+  const viewModel = asObj(pack.viewModel) || {};
+  const viewScore = asObj(pack.viewScore);
+  const score = asObj(pack.score);
+  const extension = asObj(pack.extension) || {};
+  const result = asObj(pack.result) || {};
+  const modules = new Map(ROOT_MODULE_ORDER.map((id) => [id, emptyRootModule(id)]));
+  const dims = new Map(ROOT_DIM_ORDER.map((id) => [id, emptyRootDim(id)]));
+
+  [extension, score].forEach((bag) => {
+    applyRootModuleBag(modules, bag);
+    applyRootDimBag(dims, bag);
+  });
+  if (Array.isArray(report.dimensions)) {
+    applyRootDimList(dims, report.dimensions);
+    applyRootModuleList(modules, report.dimensions);
+  } else if (asObj(report.dimensions)) {
+    applyRootDimMap(dims, report.dimensions);
+    applyRootModuleMap(modules, report.dimensions);
+  }
+  applyRootModuleBag(modules, result);
+  applyRootDimBag(dims, result);
+  [viewScore, viewModel].forEach((bag) => {
+    applyRootModuleBag(modules, bag);
+    applyRootDimBag(dims, bag);
+  });
+
+  const dimList = ROOT_DIM_ORDER.map((id) => dims.get(id));
+  const moduleList = ROOT_MODULE_ORDER.map((id) => {
+    const slot = modules.get(id);
+    if (slot.score == null) {
+      const pair = slot.dimIds.map((dimId) => dims.get(dimId).score);
+      if (pair.every((value) => value != null)) slot.score = Math.round((pair[0] + pair[1]) / 2);
+    }
+    if (!slot.status) slot.status = rootStatus(slot.score);
+    return slot;
+  });
+  dimList.forEach((slot) => {
+    if (!slot.status) slot.status = rootStatus(slot.score);
+  });
+
+  let findings = null;
+  for (const bag of [viewModel, viewScore, result, score, extension]) {
+    const got = findingsFrom(bag);
+    if (got) {
+      findings = got;
+      break;
+    }
+  }
+  if (findings == null) {
+    const blocks = blocksOf(report.interpretation).concat(blocksOf(report.recommendations)).filter((block) => !rootSkipBlock(block));
+    findings = blocks.map((block) => (block.title && block.title !== block.text ? `${block.title}：${block.text}` : block.text));
+  }
+  const headline = pickText([viewModel, viewScore, result], ["headline", "title"]);
+  let climates = null;
+  for (const bag of [viewModel, viewScore, result, score, extension]) {
+    if (ownedClimate(bag) === undefined) continue;
+    climates = readRootClimates(ownedClimate(bag));
+    break;
+  }
+  const scaleName = text(report.assessmentName) || ROOT_SCALE;
+  return {
+    scaleName,
+    headline: headline && headline !== scaleName ? headline : "",
+    modules: moduleList,
+    dimensions: dimList,
+    findings: findings || [],
+    climates,
+    rushed: rootRushed([viewModel, viewScore, result, score, extension]),
+    notice: ROOT_NOTICE,
+    nickname: text(report.nickname),
+    completedAt: report.completedAt,
+    version: versionText(report.assessmentVersion),
+    empty: !moduleList.some((slot) => slot.score != null) && !dimList.some((slot) => slot.score != null),
+  };
+}
+
+function rootModuleArticle(slot) {
+  return `
+    <article class="root-module">
+      <h3>${esc(slot.name)}</h3>
+      <p class="sefs-score">${esc(showScore(slot.score))}</p>
+      <div class="sefs-track" aria-hidden="true"><div class="sefs-fill root-fill" style="width:${rootBar(slot).toFixed(1)}%"></div></div>
+      <p class="sefs-dim-meta"><span>${esc(slot.status || "—")}</span></p>
+      ${slot.about ? `<p class="scl-narrative">${esc(slot.about)}</p>` : ""}
+    </article>
+  `;
+}
+
+function rootDimArticle(slot) {
+  return `
+    <article class="sefs-dim">
+      <div class="sefs-dim-head">
+        <h3>${esc(slot.name)}</h3>
+        <p class="sefs-score">${esc(showScore(slot.score))} <small>${esc(slot.status || "—")}</small></p>
+      </div>
+      <div class="sefs-track" aria-hidden="true"><div class="sefs-fill root-fill" style="width:${rootBar(slot).toFixed(1)}%"></div></div>
+      <p class="sefs-dim-meta"><span>${esc(slot.module)}</span></p>
+      ${slot.about ? `<p class="scl-narrative">${esc(slot.about)}</p>` : ""}
+    </article>
+  `;
+}
+
+function rootClimateArticle(slot) {
+  return `<li><span>${esc(slot.name)}</span><b>${esc(slot.label || "—")}</b></li>`;
+}
+
+export function renderRootReport(report) {
+  const model = readRoot(report);
+  const who = model.headline ? `<p class="scl-who">${esc(model.scaleName)}</p>` : "";
+  const findings = model.findings.length
+    ? `<h2 class="sefs-section">关键发现</h2><section class="sefs-insight">${model.findings.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    : "";
+  const climates = model.climates
+    ? `<h2 class="sefs-section">家庭氛围</h2><p class="scl-sub">这些是你对成长环境的主观体验，不代表对任何家庭成员的评价。</p><ul class="root-climate">${model.climates.map(rootClimateArticle).join("")}</ul>`
+    : "";
+  return `
+    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
+    ${who}
+    <h2 class="sefs-name">${esc(model.headline || model.scaleName)}</h2>
+    <p class="sefs-kicker">${esc(ROOT_NOTICE)}</p>
+    ${model.rushed ? `<p class="scl-rush"><strong>作答偏快。</strong>下面的分数仍然按交卷时的结果展示。</p>` : ""}
+    ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
+    <h2 class="sefs-section">四大生命能力</h2>
+    <section class="root-modules">${model.modules.map(rootModuleArticle).join("")}</section>
+    <h2 class="sefs-section">八项生命能力</h2>
+    <section class="sefs-dims">${model.dimensions.map(rootDimArticle).join("")}</section>
+    ${findings}
+    ${climates}
+    <p class="sefs-notice">${esc(model.notice)}</p>
+    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+  `;
+}
+
 export function renderReport(report) {
   if (report && report.assessmentId === "star") return renderStarReport(report);
   if (report && report.assessmentId === "sefs") return renderSefsReport(report);
   if (report && report.assessmentId === "scl90") return renderScl90Report(report);
   if (report && report.assessmentId === "pdq4") return renderPdq4Report(report);
   if (report && report.assessmentId === "ecr") return renderEcrReport(report);
+  if (report && report.assessmentId === "root") return renderRootReport(report);
   return `<p class="state">这份报告的阅读页还没接上。${esc(report && report.assessmentName || "")}</p>`;
 }
