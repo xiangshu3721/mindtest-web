@@ -6,6 +6,8 @@ import { SCALES, TOO_GOOD_REVERSE } from "../pdq/js/data.js";
 import { scorePdq4 } from "../pdq/js/score.js";
 import { FACTORS } from "../scl90/js/data.js";
 import { scoreScl90 } from "../scl90/js/score.js";
+import { QUESTIONS, REVERSE_ITEMS } from "../ecr/js/data.js";
+import { scoreEcr } from "../ecr/js/score.js";
 import { renderReport } from "./report-render.js";
 
 const when = "2026-10-22T09:30:00+08:00";
@@ -50,8 +52,8 @@ test("旧的六芒星报告仍然可读", () => {
 });
 
 test("其他测评仍提示阅读页还没接上", () => {
-  const html = renderReport({ assessmentId: "ecr", assessmentName: "成人依恋" });
-  assert.equal(html.includes("这份报告的阅读页还没接上。成人依恋"), true);
+  const html = renderReport({ assessmentId: "holland", assessmentName: "霍兰德" });
+  assert.equal(html.includes("这份报告的阅读页还没接上。霍兰德"), true);
   assert.equal(renderReport(null).includes("这份报告的阅读页还没接上。"), true);
 });
 
@@ -940,4 +942,152 @@ test("PDQ-4 掩饰和怀疑同时标记时平实可读，并转义昵称和画�
   assert.equal(html.includes("合成 1 分，记在边缘型。"), true);
   assert.equal(html.includes("合成 0 分，记在反社会型。"), true);
   assert.equal(html.includes("筛查不是诊断"), true);
+});
+
+const ECR_REVERSE = new Set(REVERSE_ITEMS);
+const ECR_TYPE_NAMES = ["安全型", "恐惧型", "专注型", "冷漠型"];
+
+function ecrPattern({ avoidance = 1, anxiety = 1 } = {}) {
+  return QUESTIONS.map((_, index) => {
+    const n = index + 1;
+    const want = n % 2 === 1 ? avoidance : anxiety;
+    return ECR_REVERSE.has(n) ? 8 - want : want;
+  });
+}
+
+test("ECR 用 scoreEcr 的结果画出类型、两维和四个判别分", () => {
+  const scored = scoreEcr(ecrPattern({ avoidance: 2, anxiety: 6 }));
+  const html = renderReport({
+    assessmentId: "ecr",
+    assessmentName: "成人依恋关系测评 ECR",
+    assessmentVersion: "ecr-cn-2006-v1",
+    nickname: "阿禾",
+    completedAt: when,
+    extensionData: { score: scored },
+  });
+  const win = scored.types.find((type) => type.win);
+  assert.equal(scored.type.id, "preoccupied");
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("成人依恋关系测评 ECR"), true);
+  assert.equal(html.includes("<h2 class=\"sefs-name\">专注型</h2>"), true);
+  assert.equal(html.includes(scored.type.short), true);
+  assert.equal(html.includes(scored.type.text), true);
+  assert.equal(html.includes("2.00 <small>/ 7</small>"), true);
+  assert.equal(html.includes("6.00 <small>/ 7</small>"), true);
+  assert.equal(html.includes("低于中点"), true);
+  assert.equal(html.includes("高于中点"), true);
+  assert.equal(html.includes("width:16.7%"), true);
+  assert.equal(html.includes("width:83.3%"), true);
+  assert.equal(html.includes("left:50%"), true);
+  assert.equal(html.indexOf("<h3>依恋回避</h3>") < html.indexOf("<h3>依恋焦虑</h3>"), true);
+  assert.equal(html.includes(`<span>专注型 · 最高</span><b>${win.m.toFixed(2)}</b>`), true);
+  for (let i = 1; i < ECR_TYPE_NAMES.length; i += 1) {
+    assert.equal(html.indexOf(`<span>${ECR_TYPE_NAMES[i - 1]}`) < html.indexOf(`<span>${ECR_TYPE_NAMES[i]}`), true);
+  }
+  assert.equal(html.split("ecr-win").length - 1, 1);
+  assert.equal(html.includes("18 题合计 36"), true);
+  assert.equal(html.includes("18 题合计 108"), true);
+  assert.equal(html.includes("筛查不是诊断"), true);
+  assert.equal(html.includes("也不能代替面谈"), true);
+  assert.equal(html.includes("阿禾"), true);
+  assert.equal(html.includes("ecr-cn-2006-v1"), true);
+  assert.equal(html.includes("2026年10月22日"), true);
+  assert.equal(html.includes("作答偏快"), false);
+  assert.equal(html.includes("两个均分都贴着中点"), false);
+});
+
+test("ECR 的 viewModel 盖过 extensionData.score，答案不会被拿来重算", () => {
+  const scored = scoreEcr(ecrPattern({ avoidance: 2, anxiety: 6 }));
+  const html = renderReport({
+    assessmentId: "ecr",
+    assessmentName: "成人依恋关系测评 ECR",
+    nickname: "小林",
+    completedAt: when,
+    result: { headline: "不该用的标题", summary: "不该用的正文", label: "不该用的短句", code: "fearful" },
+    dimensions: [
+      { id: "avoidance", name: "依恋回避", score: 7, max: 7, level: "high", levelLabel: "不该出现的水平" },
+      { id: "anxiety", name: "依恋焦虑", score: 7, max: 7 },
+    ],
+    reportContent: {
+      viewModel: {
+        avoidance: { mean: 1, level: "low", levelLabel: "低于中点" },
+        anxiety: { mean: 1.5, level: "low", levelLabel: "低于中点" },
+        type: { id: "secure", name: "安全型", short: "自定义短句", text: "自定义类型说明" },
+        types: [
+          { id: "secure", m: 3.5, win: true },
+          { id: "fearful", m: 1, win: false },
+          { id: "preoccupied", m: 0.2, win: false },
+          { id: "dismissing", m: -1, win: false },
+        ],
+        tied: false,
+        closeCall: false,
+        nearMidpoint: false,
+        differsFromQuadrant: false,
+      },
+    },
+    extensionData: { answers: Array(36).fill(7), score: scored },
+  });
+  assert.equal(html.includes("自定义类型说明"), true);
+  assert.equal(html.includes("自定义短句"), true);
+  assert.equal(html.includes("<h2 class=\"sefs-name\">安全型</h2>"), true);
+  assert.equal(html.includes(scored.type.text), false);
+  assert.equal(html.includes("不该用的标题"), false);
+  assert.equal(html.includes("不该用的正文"), false);
+  assert.equal(html.includes("不该用的短句"), false);
+  assert.equal(html.includes("不该出现的水平"), false);
+  assert.equal(html.includes("1.00 <small>/ 7</small>"), true);
+  assert.equal(html.includes("1.50 <small>/ 7</small>"), true);
+  assert.equal(html.includes("6.00 <small>/ 7</small>"), false);
+  assert.equal(html.includes("2.00 <small>/ 7</small>"), false);
+  assert.equal(html.includes("<span>安全型 · 最高</span><b>3.50</b>"), true);
+  assert.equal(html.includes("<b>-1.00</b>"), true);
+  assert.equal(html.includes("恐惧型</h2>"), false);
+  assert.equal(html.includes("小林"), true);
+});
+
+test("ECR 只有答案时不重算，缺字段留空且转义", () => {
+  const html = renderReport({
+    assessmentId: "ecr",
+    assessmentName: "<img src=x onerror=alert(1)>",
+    nickname: "<script>alert(1)</script>",
+    completedAt: when,
+    extensionData: { answers: Array(36).fill(1) },
+    reportContent: { viewModel: { types: null, avoidance: null, type: 4, dimensions: [null, 1, "x"] } },
+  });
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("<script>"), false);
+  assert.equal(html.includes("<img"), false);
+  assert.equal(html.includes("&lt;script&gt;"), true);
+  assert.equal(html.includes("这份结果里没有可显示的类型。"), true);
+  assert.equal(html.includes("这份结果里没有可显示的分数。"), true);
+  assert.equal(html.includes("— <small>/ 7</small>"), true);
+  assert.equal(html.includes("1.33"), false);
+  assert.equal(html.includes("4.00"), false);
+  assert.equal(html.includes("<h3>依恋回避</h3>"), true);
+  assert.equal(html.includes("<h3>依恋焦虑</h3>"), true);
+  for (const name of ECR_TYPE_NAMES) assert.equal(html.includes(`<span>${name}</span>`), true, name);
+  assert.equal(html.includes("ecr-win"), false);
+  assert.equal(html.includes("筛查不是诊断"), true);
+  assert.equal(html.includes("也不能代替面谈"), true);
+});
+
+test("ECR 贴着中点时写出恐惧型，并标出并列或贴近的说明", () => {
+  const scored = scoreEcr(Array(36).fill(4));
+  const html = renderReport({
+    assessmentId: "ecr",
+    nickname: "阿禾",
+    completedAt: when,
+    extensionData: { score: scored, quality: { rushed: true } },
+    recommendations: [{ id: "reader", text: "统一阅读页目前只重绘职业六芒星，ECR 的阅读页会另开任务。" }],
+  });
+  assert.equal(scored.type.id, "fearful");
+  assert.equal(scored.nearMidpoint, true);
+  assert.equal(html.includes("<h2 class=\"sefs-name\">恐惧型</h2>"), true);
+  assert.equal(html.includes("4.00 <small>/ 7</small>"), true);
+  assert.equal(html.includes("处于中点"), true);
+  assert.equal(html.includes("两个均分都贴着中点"), true);
+  assert.equal(html.includes("作答偏快"), true);
+  assert.equal(html.includes("统一阅读页目前只重绘"), false);
+  assert.equal(html.includes("若只按 4 分切成四格"), false);
+  assert.equal(html.includes(`<span>恐惧型 · 最高</span><b>${scored.types.find((type) => type.win).m.toFixed(2)}</b>`), true);
 });
