@@ -315,13 +315,25 @@ ol, ul { margin: 8px 0 0; padding-left: 1.2em; }
   .holland-code { letter-spacing: 0.04em; }
 }
 
-/* 分享页套上对应测评的结果页皮肤。外层「ASVA 测评报告」在读到具体测评后让开。 */
+/* 读到具体测评后，壳子 h1 会被脚本拿掉。这里再藏一次，避免旧脚本留下没有昵称的双标题。 */
 body[data-assessment] .sheet > h1 {
   position: absolute;
   width: 1px;
   height: 1px;
+  margin: 0;
   overflow: hidden;
-  clip: rect(0 0 0 0);
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.share-nick { word-break: break-all; }
+.share-person {
+  margin: 0 0 4px;
+  font-family: var(--serif);
+  font-size: clamp(28px, 7vw, 40px);
+  font-weight: 500;
+  line-height: 1.25;
 }
 
 body[data-assessment="holland"] { background: #faf6ef; }
@@ -533,6 +545,15 @@ body[data-assessment="star"] { background: #f3ece4; }
 .ecr-map .notes p + p { margin-top: 8px; }
 .ecr-map .story { margin: 8px 0 0; }
 
+.star-map .star-title {
+  margin: 0 0 14px;
+  color: var(--ink);
+  font-size: clamp(28px, 7vw, 40px);
+  line-height: 1.25;
+  letter-spacing: 0;
+  text-align: center;
+  writing-mode: horizontal-tb;
+}
 .star-map .plate {
   position: relative;
   width: 100%;
