@@ -8,7 +8,7 @@ import { FACTORS } from "../scl90/js/data.js";
 import { scoreScl90 } from "../scl90/js/score.js";
 import { QUESTIONS, REVERSE_ITEMS } from "../ecr/js/data.js";
 import { scoreEcr } from "../ecr/js/score.js";
-import { renderReport } from "./report-render.js";
+import { renderHollandReport, renderJuyingReport, renderLoves5Report, renderReport } from "./report-render.js";
 
 const when = "2026-10-22T09:30:00+08:00";
 
@@ -52,9 +52,12 @@ test("旧的六芒星报告仍然可读", () => {
 });
 
 test("其他测评仍提示阅读页还没接上", () => {
-  const html = renderReport({ assessmentId: "holland", assessmentName: "霍兰德" });
-  assert.equal(html.includes("这份报告的阅读页还没接上。霍兰德"), true);
+  const html = renderReport({ assessmentId: "zhenai", assessmentName: "珍爱金字塔" });
+  assert.equal(html.includes("这份报告的阅读页还没接上。珍爱金字塔"), true);
   assert.equal(renderReport(null).includes("这份报告的阅读页还没接上。"), true);
+  for (const id of ["Loves5", "5loves", "Juying", "Holland"]) {
+    assert.equal(renderReport({ assessmentId: id, assessmentName: id }).includes("这份报告的阅读页还没接上"), true, id);
+  }
 });
 
 test("SEFS 用现网 calc() 画出总分、四维和洞察", () => {
@@ -1374,6 +1377,217 @@ test("寻根之旅转义昵称、标题、发现和氛围标签", () => {
   assert.equal(html.includes("10 <small>&lt;b&gt;st&lt;/b&gt;</small>"), true);
   assert.equal(html.includes("自我探索，不是医学或心理诊断。"), true);
   assert.equal(html.includes("<p class=\"sefs-score\">10</p>"), true);
+});
+
+const loveWhen = "2026-10-23T11:00:00+08:00";
+
+test("爱的 5 种语言画出主爱语、五种分数和空状态", () => {
+  const report = {
+    assessmentId: "loves5",
+    assessmentName: "爱的 5 种语言",
+    assessmentVersion: "loves5-h5-v1",
+    nickname: "小林",
+    completedAt: loveWhen,
+    dimensions: [
+      { id: "A", name: "肯定的言词", score: 12, max: 12, levelLabel: "主爱语" },
+      { id: "B", name: "精心的时刻", score: 6, max: 12 },
+      { id: "C", name: "接受礼物", score: 4, max: 12 },
+      { id: "D", name: "服务的行动", score: 5, max: 12 },
+      { id: "E", name: "身体的接触", score: 3, max: 12 },
+    ],
+    result: {
+      headline: "肯定的言词",
+      code: "A",
+      label: "主爱语",
+      summary: "从高到低：肯定的言词 12。",
+    },
+    interpretation: [{ id: "extra", text: "自定义补充一句。" }],
+  };
+  const html = renderReport(report);
+  assert.equal(html, renderLoves5Report(report));
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("肯定的言词"), true);
+  assert.equal(html.includes("Words of Affirmation"), true);
+  assert.equal(html.includes("12 <small>/ 12</small>"), true);
+  assert.equal(html.includes("主爱语"), true);
+  assert.equal(html.includes("从高到低：肯定的言词 12。"), true);
+  assert.equal(html.includes("自定义补充一句。"), true);
+  assert.equal(html.includes("不是性格诊断"), true);
+  assert.equal(html.includes("小林"), true);
+  assert.equal(html.includes("2026年10月23日"), true);
+  assert.equal(html.indexOf("肯定的言词") < html.indexOf("精心的时刻"), true);
+
+  const tied = renderLoves5Report({
+    assessmentId: "loves5",
+    dimensions: [
+      { id: "words", score: 8 },
+      { id: "time", score: 8 },
+    ],
+    result: { code: "AB", flags: ["tied"] },
+  });
+  assert.equal(tied.includes("都算主爱语"), true);
+  assert.equal(tied.includes("肯定的言词"), true);
+  assert.equal(tied.includes("精心的时刻"), true);
+  assert.equal((tied.match(/主爱语/g) || []).length >= 2, true);
+
+  const empty = renderLoves5Report({ assessmentId: "loves5" });
+  assert.equal(empty.includes("这份结果里没有可显示的五种语言分数。"), true);
+  assert.equal(empty.includes("爱的 5 种语言"), true);
+  assert.equal(empty.includes("这份报告的阅读页还没接上"), false);
+
+  const hostile = renderLoves5Report({
+    assessmentId: "loves5",
+    assessmentName: "<img src=x>",
+    nickname: "<script>alert(1)</script>",
+    result: { headline: "<b>坏标题</b>", summary: "<script>alert(2)</script>" },
+    dimensions: [{ id: "A", score: 1, narrative: "<img src=y>" }],
+  });
+  assert.equal(hostile.includes("<script>"), false);
+  assert.equal(hostile.includes("<img"), false);
+  assert.equal(hostile.includes("<b>"), false);
+  assert.equal(hostile.includes("&lt;script&gt;"), true);
+  assert.equal(hostile.includes("&lt;b&gt;坏标题&lt;/b&gt;"), true);
+});
+
+test("巨婴测评画出总分、分档、两边分数，并写明不是诊断", () => {
+  const report = {
+    assessmentId: "juying",
+    assessmentName: "巨婴测评",
+    assessmentVersion: "juying-h5-v1",
+    nickname: "小林",
+    completedAt: loveWhen,
+    dimensions: [
+      { id: "total", name: "总分", score: 41, max: 100, levelLabel: "有部分巨婴特质" },
+      { id: "mind", name: "心理特征", score: 30, max: 50 },
+      { id: "act", name: "行为特征", score: 11, max: 50 },
+    ],
+    result: {
+      headline: "有部分巨婴特质 · 41 分",
+      code: "partial",
+      label: "有部分巨婴特质",
+      summary: "心理特征比行为特征明显更高。",
+    },
+    reportContent: {
+      viewModel: {
+        side: "心理特征比行为特征明显更高，差 19 分。",
+        marked: [{ group: "心理特征", n: 1, text: "求认可，求关注。", score: 5, label: "与我一样" }],
+      },
+    },
+  };
+  const html = renderReport(report);
+  assert.equal(html, renderJuyingReport(report));
+  assert.equal(html.includes(">41<span>"), true);
+  assert.equal(html.includes("有部分巨婴特质"), true);
+  assert.equal(html.includes("30 <small>/ 50</small>"), true);
+  assert.equal(html.includes("11 <small>/ 50</small>"), true);
+  assert.equal(html.includes("求认可，求关注。"), true);
+  assert.equal(html.includes("不是诊断"), true);
+  assert.equal(html.includes("非严肃科学，仅供讲座听众理解学习。"), true);
+  assert.equal(html.includes("分档名称不是诊断。"), true);
+  assert.equal(html.indexOf("心理特征") < html.indexOf("行为特征"), true);
+
+  const named = renderJuyingReport({
+    assessmentId: "juying",
+    extensionData: { score: { total: 0, mind: 0, act: 0, band: { id: "mature", name: "心智成熟" } } },
+    result: { code: "mature" },
+  });
+  assert.equal(named.includes(">0<span>"), true);
+  assert.equal(named.includes("心智成熟"), true);
+  assert.equal(named.includes("这份结果里没有可显示的分数。"), false);
+
+  const empty = renderJuyingReport({ assessmentId: "juying" });
+  assert.equal(empty.includes("这份结果里没有可显示的分数。"), true);
+  assert.equal(empty.includes("不是诊断"), true);
+  assert.equal(empty.includes("这份报告的阅读页还没接上"), false);
+
+  const hostile = renderJuyingReport({
+    assessmentId: "juying",
+    nickname: "<script>alert(1)</script>",
+    result: { headline: "<img src=x>", label: "<b>档</b>" },
+    reportContent: { viewModel: { marked: [{ text: "<script>item</script>", score: 4 }] } },
+  });
+  assert.equal(hostile.includes("<script>"), false);
+  assert.equal(hostile.includes("<img"), false);
+  assert.equal(hostile.includes("<b>"), false);
+  assert.equal(hostile.includes("&lt;script&gt;item&lt;/script&gt;"), true);
+});
+
+test("霍兰德兴趣探索画出三字码、六个分数和结构", () => {
+  const report = {
+    assessmentId: "holland",
+    assessmentName: "霍兰德兴趣探索",
+    assessmentVersion: "holland-h5-v1",
+    nickname: "小林",
+    completedAt: loveWhen,
+    dimensions: [
+      { id: "R", name: "实际", score: 80, max: 100 },
+      { id: "I", name: "研究", score: 60, max: 100 },
+      { id: "A", name: "艺术", score: 55, max: 100 },
+      { id: "S", name: "社会", score: 40, max: 100 },
+      { id: "E", name: "企业", score: 30, max: 100 },
+      { id: "C", name: "常规", score: 20, max: 100 },
+    ],
+    result: {
+      headline: "核心兴趣组合：RIA",
+      code: "RIA",
+      label: "实际 R × 研究 I × 艺术 A",
+      summary: "第一兴趣明显高出第二兴趣。",
+    },
+    reportContent: {
+      viewModel: {
+        holland_code: "RIA",
+        ranking: ["R", "I", "A", "S", "E", "C"],
+        structure: { consistency: "HIGH" },
+        bands: { dominance: "PROMINENT", differentiation: "HIGH", breadth: "FEW" },
+        quality: ["MANY_UNSURE"],
+        explore: { q1: "写信到忘记时间" },
+      },
+    },
+  };
+  const html = renderReport(report);
+  assert.equal(html, renderHollandReport(report));
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("核心兴趣组合：RIA"), true);
+  assert.equal(html.includes("holland-code"), true);
+  assert.equal(html.includes(">R</span>"), true);
+  assert.equal(html.includes("实际 R × 研究 I × 艺术 A"), true);
+  assert.equal(html.includes(">80</p>"), true);
+  assert.equal(html.includes("第一兴趣突出"), true);
+  assert.equal(html.includes("区分清楚"), true);
+  assert.equal(html.includes("相邻"), true);
+  assert.equal(html.includes("有几个中心"), true);
+  assert.equal(html.includes("暂时的兴趣地图"), true);
+  assert.equal(html.includes("写信到忘记时间"), true);
+  assert.equal(html.includes("不是职业诊断"), true);
+  assert.equal(html.indexOf(">80</p>") < html.indexOf(">60</p>"), true);
+  assert.equal(html.indexOf(">60</p>") < html.indexOf(">20</p>"), true);
+
+  const aliased = renderHollandReport({
+    assessmentId: "holland",
+    extensionData: { score: { hollandCode: "SEC", scores: { social: 70, enterprising: 66, conventional: 40 } } },
+  });
+  assert.equal(aliased.includes(">S</span>"), true);
+  assert.equal(aliased.includes(">70</p>"), true);
+  assert.equal(aliased.includes("社会"), true);
+
+  const empty = renderHollandReport({ assessmentId: "holland" });
+  assert.equal(empty.includes("这份结果里没有可显示的兴趣分数。"), true);
+  assert.equal(empty.includes("霍兰德兴趣探索"), true);
+  assert.equal(empty.includes("不是职业诊断"), true);
+  assert.equal(empty.includes("这份报告的阅读页还没接上"), false);
+
+  const hostile = renderHollandReport({
+    assessmentId: "holland",
+    nickname: "<script>alert(1)</script>",
+    result: { code: "<img src=x onerror=alert(1)>", headline: "<b>码</b>", label: "<i>标签</i>" },
+    reportContent: { viewModel: { explore: { q1: "<script>q</script>" } } },
+  });
+  assert.equal(hostile.includes("<script>"), false);
+  assert.equal(hostile.includes("<img"), false);
+  assert.equal(hostile.includes("<b>"), false);
+  assert.equal(hostile.includes("<i>"), false);
+  assert.equal(hostile.includes("&lt;script&gt;q&lt;/script&gt;"), true);
+  assert.equal(hostile.includes("&lt;b&gt;码&lt;/b&gt;"), true);
 });
 
 test("只有 assessmentId 正好是 root 才画寻根之旅", () => {
