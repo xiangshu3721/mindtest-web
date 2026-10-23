@@ -1091,3 +1091,295 @@ test("ECR 贴着中点时写出恐惧型，并标出并列或贴近的说明", (
   assert.equal(html.includes("若只按 4 分切成四格"), false);
   assert.equal(html.includes(`<span>恐惧型 · 最高</span><b>${scored.types.find((type) => type.win).m.toFixed(2)}</b>`), true);
 });
+
+const ROOT_MODULES = ["主体性", "情感力", "关系力", "价值力"];
+const ROOT_DIMS = ["自我认知", "自主边界", "情绪觉察", "情感独立", "倾听理解", "柔和表达", "自我价值感", "价值实现力"];
+
+test("寻根之旅用 viewModel 画出四项能力、八个维度、发现和家庭氛围", () => {
+  const html = renderReport({
+    assessmentId: "root",
+    assessmentName: "寻根之旅 · 生命成长地图",
+    assessmentVersion: "root-h5-v1",
+    nickname: "阿禾",
+    completedAt: when,
+    dimensions: [
+      { id: "self_awareness", name: "自我认知", score: 15, level: "explore", levelLabel: "不该出现" },
+      { id: "autonomy_boundary", score: 15, levelLabel: "不该出现" },
+      { id: "subjectivity", score: 15, levelLabel: "不该出现" },
+      { id: "emotion", score: 15, levelLabel: "不该出现" },
+      { id: "relationship", score: 15, levelLabel: "不该出现" },
+      { id: "value", score: 15, levelLabel: "不该出现" },
+    ],
+    result: {
+      headline: "不该用的标题",
+      summary: "不该用的摘要",
+      findings: ["不该用的发现"],
+      familyClimate: [{ id: "high_expectation", name: "高期待", value: 1, levelLabel: "很少" }],
+    },
+    recommendations: [{ id: "reader", text: "阅读页若尚未重绘寻根之旅，生命成长地图在 interpretation、sections 与 textFallback。" }],
+    reportContent: {
+      viewModel: {
+        headline: "我的生命成长地图",
+        answers: Array(33).fill(1),
+        developmentAnswers: [3, 3, 3, 3],
+        rushed: false,
+        modules: [
+          { id: "subjectivity", name: "主体性", score: 78, level: "good", levelLabel: "模块原话" },
+          { id: "emotion", name: "情感力", score: 64, level: "room" },
+          { id: "relationship", score: 88, level: "strong", levelLabel: "优势明显" },
+          { id: "value", score: 57, level: "room", levelLabel: "有提升空间" },
+        ],
+        abilities: [
+          { id: "self_awareness", name: "自我认知", score: 80, level: "good", levelLabel: "量表原话", moduleId: "subjectivity" },
+          { id: "autonomy_boundary", score: 70, level: "stable" },
+          { id: "emotion_awareness", score: 60, level: "room", levelLabel: "有提升空间" },
+          { id: "emotional_independence", score: 50, level: "watch", levelLabel: "值得关注" },
+          { id: "listening_understanding", score: 92, level: "strong", levelLabel: "优势明显" },
+          { id: "gentle_expression", score: 40, level: "focus", levelLabel: "当前成长重点" },
+          { id: "self_worth", score: 30, level: "explore", levelLabel: "值得深入探索" },
+          { id: "value_realization", score: 20, level: "strong" },
+        ],
+        findings: ["自我认知与倾听理解是你目前较突出的能力组合。"],
+        familyClimate: [
+          { id: "high_expectation", name: "高期待", value: 1, levelLabel: "较明显" },
+          { id: "emotional_suppression", name: "情感压抑", value: 2, levelLabel: "较少" },
+          { id: "control_intervention", name: "控制干预", value: 5, levelLabel: "明显" },
+          { id: "criticism", name: "批评指责", value: 1, levelLabel: "很少" },
+          { id: "warmth", name: "温暖支持", value: 3, levelLabel: "一般" },
+        ],
+      },
+    },
+    extensionData: {
+      answers: Array(33).fill(5),
+      quality: { rushed: true },
+      score: {
+        moduleScores: { subjectivity: 11 },
+        dimensionScores: { self_awareness: 11, autonomy_boundary: 11 },
+        familyClimate: [1, 1, 1, 1, 1],
+        findings: ["不该出现的扩展发现"],
+      },
+    },
+  });
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("寻根之旅 · 生命成长地图"), true);
+  assert.equal(html.includes("<h2 class=\"sefs-name\">我的生命成长地图</h2>"), true);
+  assert.equal(html.includes("不该用的标题"), false);
+  assert.equal(html.includes("不该用的摘要"), false);
+  assert.equal(html.includes("不该用的发现"), false);
+  assert.equal(html.includes("不该出现的扩展发现"), false);
+  assert.equal(html.includes("不该出现"), false);
+  assert.equal(html.includes("自我认知与倾听理解是你目前较突出的能力组合。"), true);
+  assert.equal(html.includes("<p class=\"sefs-score\">78</p>"), true);
+  assert.equal(html.includes("<p class=\"sefs-score\">64</p>"), true);
+  assert.equal(html.includes("<p class=\"sefs-score\">88</p>"), true);
+  assert.equal(html.includes("<p class=\"sefs-score\">57</p>"), true);
+  assert.equal(html.includes("模块原话"), true);
+  assert.equal(html.includes(">11<"), false);
+  assert.equal(html.includes(">15<"), false);
+  assert.equal(html.includes("80 <small>量表原话</small>"), true);
+  assert.equal(html.includes("70 <small>较为稳定</small>"), true);
+  assert.equal(html.includes("60 <small>有提升空间</small>"), true);
+  assert.equal(html.includes("50 <small>值得关注</small>"), true);
+  assert.equal(html.includes("92 <small>优势明显</small>"), true);
+  assert.equal(html.includes("40 <small>当前成长重点</small>"), true);
+  assert.equal(html.includes("30 <small>值得深入探索</small>"), true);
+  assert.equal(html.includes("20 <small>优势明显</small>"), true);
+  assert.equal(html.includes("20 <small>值得深入探索</small>"), false);
+  assert.equal(html.includes("发展较好"), false);
+  assert.equal(html.includes("尚未重绘"), false);
+  assert.equal(html.includes("作答偏快"), false);
+  assert.equal(html.includes("<span>高期待</span><b>较明显</b>"), true);
+  assert.equal(html.includes("<span>情感压抑</span><b>较少</b>"), true);
+  assert.equal(html.includes("<span>控制干预</span><b>明显</b>"), true);
+  assert.equal(html.includes("<span>批评指责</span><b>很少</b>"), true);
+  assert.equal(html.includes("<span>温暖支持</span><b>一般</b>"), true);
+  assert.equal(html.includes("自我探索，不是医学或心理诊断。"), true);
+  assert.equal(html.includes("阿禾"), true);
+  assert.equal(html.includes("root-h5-v1"), true);
+  assert.equal(html.includes("2026年10月22日"), true);
+  for (let i = 1; i < ROOT_MODULES.length; i += 1) {
+    assert.equal(html.indexOf(`<h3>${ROOT_MODULES[i - 1]}</h3>`) < html.indexOf(`<h3>${ROOT_MODULES[i]}</h3>`), true);
+  }
+  for (let i = 1; i < ROOT_DIMS.length; i += 1) {
+    assert.equal(html.indexOf(`<h3>${ROOT_DIMS[i - 1]}</h3>`) < html.indexOf(`<h3>${ROOT_DIMS[i]}</h3>`), true);
+  }
+  assert.equal(html.indexOf("四大生命能力") < html.indexOf("八项生命能力"), true);
+  assert.equal(html.indexOf("八项生命能力") < html.indexOf("关键发现"), true);
+  assert.equal(html.indexOf("关键发现") < html.indexOf("家庭氛围"), true);
+});
+
+test("寻根之旅没有 viewModel 时从 dimensions 和 result 回退", () => {
+  const html = renderReport({
+    assessmentId: "root",
+    assessmentName: "寻根之旅 · 生命成长地图",
+    assessmentVersion: "2.0",
+    nickname: "小林",
+    completedAt: when,
+    dimensions: [
+      { id: "self_awareness", name: "自我认知", score: 80, level: "good", levelLabel: "发展较好" },
+      { id: "autonomy_boundary", name: "自主边界", score: 70, level: "stable", levelLabel: "较为稳定" },
+      { id: "emotion_awareness", score: 60, level: "room", levelLabel: "有提升空间" },
+      { id: "emotional_independence", score: 50, level: "watch", levelLabel: "值得关注" },
+      { id: "listening_understanding", score: 92, level: "strong", levelLabel: "优势明显" },
+      { id: "gentle_expression", score: 15, level: "explore", levelLabel: "值得深入探索" },
+      { id: "self_worth", score: 30, level: "explore", levelLabel: "值得深入探索" },
+      { id: "value_realization", score: 20, level: "explore", levelLabel: "自定义状态" },
+      { id: "subjectivity", score: 76, level: "good", levelLabel: "发展较好" },
+      { id: "emotion", score: 58, level: "room", levelLabel: "有提升空间" },
+      { id: "relationship", score: 66, level: "stable", levelLabel: "较为稳定" },
+      { id: "value", score: 24, level: "explore", levelLabel: "值得深入探索" },
+    ],
+    result: { summary: "从维度回退读到的发现" },
+    recommendations: [{ id: "reader", text: "阅读页若尚未重绘寻根之旅，生命成长地图在 interpretation、sections 与 textFallback。" }],
+    extensionData: {
+      answers: Array(33).fill(5),
+      quality: { rushed: true },
+      score: {
+        dimensionScores: { self_awareness: 11, autonomy_boundary: 11, emotion_awareness: 11 },
+        moduleScores: { subjectivity: 11 },
+        findings: ["不该出现的扩展发现"],
+        familyClimate: [4, 2, 5, 1, 3],
+      },
+    },
+  });
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("<p class=\"sefs-score\">76</p>"), true);
+  assert.equal(html.includes("<p class=\"sefs-score\">58</p>"), true);
+  assert.equal(html.includes("<p class=\"sefs-score\">66</p>"), true);
+  assert.equal(html.includes("<p class=\"sefs-score\">24</p>"), true);
+  assert.equal(html.includes("<p class=\"sefs-score\">75</p>"), false);
+  assert.equal(html.includes("<p class=\"sefs-score\">55</p>"), false);
+  assert.equal(html.includes("80 <small>发展较好</small>"), true);
+  assert.equal(html.includes("70 <small>较为稳定</small>"), true);
+  assert.equal(html.includes("92 <small>优势明显</small>"), true);
+  assert.equal(html.includes("15 <small>值得深入探索</small>"), true);
+  assert.equal(html.includes("20 <small>自定义状态</small>"), true);
+  assert.equal(html.includes("20 <small>值得深入探索</small>"), false);
+  assert.equal(html.includes("从维度回退读到的发现"), true);
+  assert.equal(html.includes("不该出现的扩展发现"), false);
+  assert.equal(html.includes("尚未重绘"), false);
+  assert.equal(html.includes("<span>高期待</span><b>较明显</b>"), true);
+  assert.equal(html.includes("<span>情感压抑</span><b>较少</b>"), true);
+  assert.equal(html.includes("<span>控制干预</span><b>明显</b>"), true);
+  assert.equal(html.includes("<span>批评指责</span><b>很少</b>"), true);
+  assert.equal(html.includes("<span>温暖支持</span><b>一般</b>"), true);
+  assert.equal(html.split("很少").length - 1, 1);
+  assert.equal(html.includes(">11<"), false);
+  assert.equal(html.includes("作答偏快"), true);
+  assert.equal(html.includes("小林"), true);
+  assert.equal(html.includes("2.0"), true);
+  assert.equal(html.includes("自我探索，不是医学或心理诊断。"), true);
+  assert.equal(html.includes("这份结果里没有可显示的分数。"), false);
+  const legacy = renderReport({
+    assessmentId: "root",
+    dimensions: [{ id: "agency", score: 60, levelLabel: "有提升空间" }],
+  });
+  assert.equal(legacy.includes("<h3>主体性</h3>"), true);
+  assert.equal(legacy.includes("<p class=\"sefs-score\">60</p>"), true);
+});
+
+test("寻根之旅缺字段显示破折号，答案和半个模块都不编分数", () => {
+  const html = renderReport({
+    assessmentId: "root",
+    assessmentName: "寻根之旅 · 生命成长地图",
+    assessmentVersion: { unexpected: true },
+    nickname: "阿禾",
+    completedAt: when,
+    reportContent: {
+      viewModel: { modules: null, abilities: [null, 1, "x"], dimensions: [null, 1, "x"], findings: null, familyClimate: null },
+    },
+    result: { findings: "不该从空的 viewModel 漏出来" },
+    extensionData: { answers: Array(37).fill(5), score: { answers: Array(33).fill(5) } },
+  });
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("[object Object]"), false);
+  assert.equal(html.includes("不该从空的 viewModel 漏出来"), false);
+  assert.equal(html.includes("家庭氛围"), false);
+  assert.equal(html.includes("高期待"), false);
+  assert.equal(html.includes("关键发现"), false);
+  assert.equal(html.includes("这份结果里没有可显示的分数。"), true);
+  assert.equal((html.match(/<p class="sefs-score">—<\/p>/g) || []).length, 4);
+  assert.equal((html.match(/<p class="sefs-score">— <small>—<\/small><\/p>/g) || []).length, 8);
+  assert.equal(/<p class="sefs-score">\d/.test(html), false);
+  assert.equal(html.includes("优势明显"), false);
+  assert.equal(html.includes("阿禾"), true);
+  assert.equal(html.includes("自我探索，不是医学或心理诊断。"), true);
+  for (const name of ROOT_DIMS) assert.equal(html.includes(`<h3>${name}</h3>`), true, name);
+
+  const odd = renderReport({
+    assessmentId: "root",
+    assessmentVersion: "root-h5-v2",
+    reportContent: "bad",
+    dimensions: "bad",
+    result: "bad",
+    extensionData: "bad",
+  });
+  assert.equal(typeof odd, "string");
+  assert.equal(odd.includes("root-h5-v2"), true);
+  assert.equal(odd.includes("四大生命能力"), true);
+  assert.equal(odd.includes("[object Object]"), false);
+
+  const vector = renderReport({
+    assessmentId: "root",
+    extensionData: { answers: Array(33).fill(5), familyClimate: Array(33).fill(5) },
+  });
+  assert.equal(vector.includes("家庭氛围"), false);
+  assert.equal(/<p class="sefs-score">\d/.test(vector), false);
+
+  const partial = renderReport({
+    assessmentId: "root",
+    dimensions: [{ id: "self_awareness", score: 80 }],
+    extensionData: { answers: Array(33).fill(5) },
+  });
+  const modulesHtml = partial.split("<h2 class=\"sefs-section\">八项生命能力</h2>")[0];
+  assert.equal(modulesHtml.includes(">80<"), false);
+  assert.equal(/<p class="sefs-score">\d/.test(modulesHtml), false);
+  assert.equal(partial.includes("80 <small>发展较好</small>"), true);
+  assert.equal(partial.includes("自主边界"), true);
+  assert.equal((partial.match(/<p class="sefs-score">— <small>—<\/small><\/p>/g) || []).length, 7);
+});
+
+test("寻根之旅转义昵称、标题、发现和氛围标签", () => {
+  const html = renderReport({
+    assessmentId: "root",
+    assessmentName: "<img src=x onerror=alert(1)>",
+    assessmentVersion: "root-h5-v1",
+    nickname: "<script>alert(1)</script>",
+    completedAt: when,
+    reportContent: {
+      viewModel: {
+        headline: "<script>alert(2)</script>",
+        findings: ["<img src=y onerror=alert(3)>"],
+        modules: [{ id: "subjectivity", name: "<b>主体性</b>", score: 10, levelLabel: "<i>坏</i>" }],
+        abilities: [{
+          id: "self_awareness",
+          name: "<script>dim</script>",
+          score: 10,
+          levelLabel: "<b>st</b>",
+          narrative: "<img src=z>",
+        }],
+        familyClimate: [{ id: "high_expectation", name: "<script>climate</script>", levelLabel: "<img src=c>" }],
+      },
+    },
+  });
+  assert.equal(html.includes("<script>"), false);
+  assert.equal(html.includes("<img"), false);
+  assert.equal(html.includes("<b>主体性</b>"), false);
+  assert.equal(html.includes("<b>st</b>"), false);
+  assert.equal(html.includes("<i>"), false);
+  assert.equal(html.includes("&lt;script&gt;"), true);
+  assert.equal(html.includes("&lt;img"), true);
+  assert.equal(html.includes("&lt;b&gt;主体性&lt;/b&gt;"), true);
+  assert.equal(html.includes("&lt;i&gt;坏&lt;/i&gt;"), true);
+  assert.equal(html.includes("10 <small>&lt;b&gt;st&lt;/b&gt;</small>"), true);
+  assert.equal(html.includes("自我探索，不是医学或心理诊断。"), true);
+  assert.equal(html.includes("<p class=\"sefs-score\">10</p>"), true);
+});
+
+test("只有 assessmentId 正好是 root 才画寻根之旅", () => {
+  for (const id of ["Root", "ROOT", "root-h5-v1", "root-journey", " root"]) {
+    const html = renderReport({ assessmentId: id, assessmentName: "寻根之旅 · 生命成长地图" });
+    assert.equal(html.includes("这份报告的阅读页还没接上"), true, id);
+    assert.equal(html.includes("四大生命能力"), false, id);
+  }
+});

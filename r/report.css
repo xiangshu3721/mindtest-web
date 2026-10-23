@@ -255,7 +255,35 @@ ol, ul { margin: 8px 0 0; padding-left: 1.2em; }
 .ecr-types b { flex: none; font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .ecr-win span { color: #6b3a45; }
 
+.root-modules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 18px;
+}
+.root-module { padding: 14px 0; border-top: 1px solid #e6ddd4; }
+.root-module h3 { margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 500; }
+.root-module .sefs-score {
+  margin-top: 4px;
+  color: #14352c;
+  font-family: var(--serif);
+  font-size: clamp(28px, 8vw, 36px);
+  line-height: 1.1;
+}
+.root-fill { background: #14352c; }
+.root-climate { list-style: none; margin: 4px 0 0; padding: 0; }
+.root-climate li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid #e6ddd4;
+}
+.root-climate span { min-width: 0; font-family: var(--serif); font-size: 18px; }
+.root-climate b { flex: none; font-size: 16px; font-weight: 500; }
+
 @media (max-width: 640px) {
   .sheet { padding: 24px 16px; }
   .roster { grid-template-columns: 1fr; }
+  .root-modules { grid-template-columns: 1fr; }
 }
