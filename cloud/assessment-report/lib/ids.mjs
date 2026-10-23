@@ -13,6 +13,9 @@ export const ALLOWED_ASSESSMENT_IDS = [
   "pdq4",
   "ecr",
   "root",
+  "loves5",
+  "juying",
+  "holland",
 ];
 
 export function assertDevCollection(name) {

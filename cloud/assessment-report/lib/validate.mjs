@@ -30,6 +30,30 @@ import {
   lifeMapAnswersOk,
   rootBodyParts,
 } from "../vendor/root-score.mjs";
+import {
+  LOVES5_CONSENT_VERSION,
+  LOVES5_READER_GAP,
+  LOVES5_VERSION,
+  loves5BodyParts,
+  loves5PicksOk,
+} from "../vendor/loves5-score.mjs";
+import {
+  JUYING_CONSENT_VERSION,
+  JUYING_DISCLAIMER,
+  JUYING_READER_GAP,
+  JUYING_SCREEN,
+  JUYING_VERSION,
+  juyingAnswersOk,
+  juyingBodyParts,
+} from "../vendor/juying-score.mjs";
+import {
+  HOLLAND_CONSENT_VERSION,
+  HOLLAND_READER_GAP,
+  HOLLAND_VERSION,
+  hollandAnswersOk,
+  hollandBodyParts,
+  hollandExploreOk,
+} from "../vendor/holland-score.mjs";
 import { ALLOWED_ASSESSMENT_IDS, REPORT_ID_RE, SECRET_RE, SUBMISSION_RE } from "./ids.mjs";
 
 export const STAR_VERSION = "star-words-31-v1";
@@ -65,6 +89,101 @@ function scanKeys(value, issues, path) {
     scanKeys(value[key], issues, `${path}.${key}`);
   }
   if (Array.isArray(value)) value.forEach((item, index) => scanKeys(item, issues, `${path}[${index}]`));
+}
+
+const PHONE_VALUE = /(?:^|[^\d])1[3-9]\d{9}(?:$|[^\d])/;
+const PARTIAL_SCOPES = ["store", "share_link", "mentor_read"];
+
+function scanPhones(value, issues, path) {
+  if (typeof value === "string") {
+    if (PHONE_VALUE.test(value)) issues.push(`${path} 不能保存手机号`);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => scanPhones(item, issues, `${path}[${index}]`));
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) scanPhones(value[key], issues, `${path}.${key}`);
+  }
+}
+
+function checkPartialFrame(result, issues, spec) {
+  scanKeys(result, issues, "result");
+  scanPhones(result, issues, "result");
+  for (const key of Object.keys(result)) {
+    if (!TOP_KEYS.has(key)) issues.push(`不能保存额外字段 ${key}`);
+  }
+  if (!REPORT_ID_RE.test(String(result.reportId || ""))) issues.push("reportId 格式不对");
+  if (result.assessmentId !== spec.id) issues.push("测评不在可保存范围内");
+  if (!String(result.assessmentName || "").includes(spec.name)) issues.push("测评名称不对");
+  if (result.assessmentVersion !== spec.version) issues.push("规则版本不对");
+  if (result.schemaVersion !== SCHEMA_VERSION) issues.push("协议版本不对");
+  const nick = chars(result.nickname);
+  if (nick.length < 1 || nick.length > 12) issues.push("昵称需要 1–12 个字");
+  if (!Number.isFinite(Date.parse(result.completedAt))) issues.push("完成时间不对");
+  if (!result.reportContent || result.reportContent.format !== "view-model+sections") {
+    issues.push("报告快照格式不对");
+  }
+  if (!result.reportContent || !result.reportContent.viewModel) issues.push("缺少视图");
+  const raw = JSON.stringify(result.reportContent || {});
+  if (/data:(image|application\/pdf)|<!doctype|<html/i.test(raw)) issues.push("不能保存图片、PDF 或 HTML");
+  const extension = result.extensionData;
+  if (!extension || typeof extension !== "object" || Array.isArray(extension)) {
+    issues.push("缺少扩展数据");
+  } else {
+    for (const key of Object.keys(extension)) {
+      if (!spec.extensionKeys.has(key)) issues.push(`不能保存额外字段 extensionData.${key}`);
+    }
+  }
+  const consent = extension && extension.consent;
+  if (!consent || consent.agreed !== true) issues.push("未同意不能保存");
+  if (consent && consent.version !== spec.consent) issues.push("同意文案版本不对");
+  const scopes = consent && consent.scopes;
+  if (!Array.isArray(scopes) || !scopes.includes("store") || !scopes.includes("share_link")) {
+    issues.push("同意范围不足");
+  } else if (scopes.some((scope) => !PARTIAL_SCOPES.includes(scope))) {
+    issues.push("同意范围不能包含档案或电话");
+  }
+  const attribution = extension && extension.attribution;
+  if (attribution != null) {
+    if (typeof attribution !== "object" || Array.isArray(attribution)) issues.push("来源标注格式不对");
+    else {
+      for (const key of Object.keys(attribution)) {
+        if (key !== "mentorId" && key !== "activity") issues.push(`不能保存额外字段 attribution.${key}`);
+        const value = attribution[key];
+        if (value == null || value === "") continue;
+        if (typeof value !== "string" || Array.from(value).length > 40) issues.push(`${key} 太长`);
+      }
+    }
+  }
+  const compat = extension && extension.compat;
+  if (!compat || compat.level !== "partial") issues.push(`${spec.label}这一期按部分兼容保存`);
+  if (!compat || !Array.isArray(compat.gaps) || !compat.gaps.includes(spec.gap)) {
+    issues.push("阅读页缺口说明不完整");
+  }
+  const source = result.source;
+  if (!source || source.origin !== "external-repo" || source.repo !== spec.repo || source.path !== spec.path) {
+    issues.push("来源不对");
+  }
+  if (!source || !SUBMISSION_RE.test(String(source.clientSubmissionId || ""))) issues.push("提交号格式不对");
+  if (source && source.resultKitId !== spec.resultKitId) issues.push("resultKit 标识不对");
+  const view = result.reportContent && result.reportContent.viewModel;
+  const rushed = view && view.rushed;
+  if (typeof rushed !== "boolean" || !sameValue(extension && extension.quality, { rushed })) {
+    issues.push("作答速度标记不一致");
+  }
+  return { view, extension, rushed };
+}
+
+function checkBody(result, issues, parts) {
+  if (!parts) return;
+  if (!sameValue(result.dimensions, parts.dimensions)) issues.push("维度与作答不一致");
+  if (!sameValue(result.result, parts.result)) issues.push("结论与作答不一致");
+  if (!sameValue(result.interpretation, parts.interpretation)) issues.push("解释与作答不一致");
+  if (!sameValue(result.recommendations, parts.recommendations)) issues.push("建议与作答不一致");
+  if (!sameValue(result.reportContent, parts.reportContent)) issues.push("视图与作答不一致");
+  if (!sameValue(result.extensionData && result.extensionData.score, parts.score)) issues.push("扩展分数与作答不一致");
 }
 
 function wordsOk(list) {
@@ -988,6 +1107,122 @@ export function validateRootResult(result) {
   return issues;
 }
 
+const LOVES5_EXTENSION_KEYS = new Set(["answers", "score", "quality", "consent", "compat", "attribution"]);
+
+export function validateLoves5Result(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  const frame = checkPartialFrame(result, issues, {
+    id: "loves5",
+    name: "爱的 5 种语言",
+    version: LOVES5_VERSION,
+    consent: LOVES5_CONSENT_VERSION,
+    gap: LOVES5_READER_GAP,
+    label: "爱的 5 种语言",
+    repo: "5loves",
+    path: "index.html",
+    resultKitId: "loves5",
+    extensionKeys: LOVES5_EXTENSION_KEYS,
+  });
+  const picks = frame.view && frame.view.picks;
+  if (!loves5PicksOk(picks)) issues.push("作答需要 30 道二选一，每题只能是该题的语言码");
+  if (loves5PicksOk(picks) && typeof frame.rushed === "boolean") {
+    let parts = null;
+    try {
+      parts = loves5BodyParts(picks, frame.rushed);
+    } catch {
+      parts = null;
+    }
+    if (!parts) issues.push("作答需要 30 道二选一，每题只能是该题的语言码");
+    else {
+      checkBody(result, issues, parts);
+      if (!sameValue(frame.extension && frame.extension.answers, picks)) issues.push("扩展作答与视图不一致");
+    }
+  }
+  return issues;
+}
+
+const JUYING_EXTENSION_KEYS = new Set(["answers", "score", "quality", "consent", "compat", "attribution"]);
+
+export function validateJuyingResult(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  const frame = checkPartialFrame(result, issues, {
+    id: "juying",
+    name: "巨婴测评",
+    version: JUYING_VERSION,
+    consent: JUYING_CONSENT_VERSION,
+    gap: JUYING_READER_GAP,
+    label: "巨婴测评",
+    repo: "juying",
+    path: "index.html",
+    resultKitId: "juying",
+    extensionKeys: JUYING_EXTENSION_KEYS,
+  });
+  const answers = frame.view && frame.view.answers;
+  if (!juyingAnswersOk(answers)) issues.push("作答需要 20 道 0–5 的整数题");
+  const blocks = []
+    .concat(result.interpretation || [], result.recommendations || [])
+    .map((item) => item && item.text);
+  if (!Array.isArray(result.interpretation) || !Array.isArray(result.recommendations)) {
+    issues.push("解释和建议必须是列表");
+  } else if (!blocks.includes(JUYING_SCREEN) || !blocks.includes(JUYING_DISCLAIMER)) {
+    issues.push("非诊断说明不完整");
+  }
+  if (juyingAnswersOk(answers) && typeof frame.rushed === "boolean") {
+    let parts = null;
+    try {
+      parts = juyingBodyParts(answers, frame.rushed);
+    } catch {
+      parts = null;
+    }
+    if (!parts) issues.push("作答需要 20 道 0–5 的整数题");
+    else {
+      checkBody(result, issues, parts);
+      if (!sameValue(frame.extension && frame.extension.answers, answers)) issues.push("扩展作答与视图不一致");
+    }
+  }
+  return issues;
+}
+
+const HOLLAND_EXTENSION_KEYS = new Set(["answers", "score", "openText", "quality", "consent", "compat", "attribution"]);
+
+export function validateHollandResult(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  const frame = checkPartialFrame(result, issues, {
+    id: "holland",
+    name: "霍兰德兴趣探索",
+    version: HOLLAND_VERSION,
+    consent: HOLLAND_CONSENT_VERSION,
+    gap: HOLLAND_READER_GAP,
+    label: "霍兰德兴趣探索",
+    repo: "holland-explore",
+    path: "index.html",
+    resultKitId: "holland",
+    extensionKeys: HOLLAND_EXTENSION_KEYS,
+  });
+  const answers = frame.view && frame.view.answers;
+  const explore = frame.view && frame.view.explore;
+  if (!hollandAnswersOk(answers)) issues.push("作答需要 60 道 1–5 的整数题");
+  if (!hollandExploreOk(explore)) issues.push("探索题格式不对");
+  if (hollandAnswersOk(answers) && hollandExploreOk(explore) && typeof frame.rushed === "boolean") {
+    let parts = null;
+    try {
+      parts = hollandBodyParts(answers, explore, frame.rushed);
+    } catch {
+      parts = null;
+    }
+    if (!parts) issues.push("作答需要 60 道 1–5 的整数题");
+    else {
+      checkBody(result, issues, parts);
+      if (!sameValue(frame.extension && frame.extension.answers, answers)) issues.push("扩展作答与视图不一致");
+      if (!sameValue(frame.extension && frame.extension.openText, parts.openText)) issues.push("探索题与视图不一致");
+    }
+  }
+  return issues;
+}
+
 export function validateAssessmentResult(result) {
   if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
   if (!ALLOWED_ASSESSMENT_IDS.includes(result.assessmentId)) return ["测评不在可保存范围内"];
@@ -997,5 +1232,8 @@ export function validateAssessmentResult(result) {
   if (result.assessmentId === "pdq4") return validatePdq4Result(result);
   if (result.assessmentId === "ecr") return validateEcrResult(result);
   if (result.assessmentId === "root") return validateRootResult(result);
+  if (result.assessmentId === "loves5") return validateLoves5Result(result);
+  if (result.assessmentId === "juying") return validateJuyingResult(result);
+  if (result.assessmentId === "holland") return validateHollandResult(result);
   return ["测评不在可保存范围内"];
 }

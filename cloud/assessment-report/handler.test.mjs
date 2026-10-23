@@ -14,6 +14,12 @@ import { buildEcrResult } from "./vendor/ecr-payload.mjs";
 import { scoreEcr as cloudScoreEcr } from "./vendor/ecr-score.mjs";
 import { buildRootResult } from "./vendor/root-payload.mjs";
 import { scoreRoot } from "./vendor/root-score.mjs";
+import { buildLoves5Result } from "./vendor/loves5-payload.mjs";
+import { PAIRS, scoreLoves5 } from "./vendor/loves5-score.mjs";
+import { buildJuyingResult } from "./vendor/juying-payload.mjs";
+import { scoreJuying } from "./vendor/juying-score.mjs";
+import { buildHollandResult } from "./vendor/holland-payload.mjs";
+import { scoreHolland } from "./vendor/holland-score.mjs";
 import { REVERSE_ITEMS as ECR_REVERSE_ITEMS } from "../../ecr/js/data.js";
 import { scoreEcr as pageScoreEcr } from "../../ecr/js/score.js";
 import { createHandler } from "./lib/handler.mjs";
@@ -1299,7 +1305,7 @@ test("ECR 按三十六题重算后可保存，错误测评或作答长度仍是 
   assert.equal(validateAssessmentResult(short.payload).includes("作答需要 36 道 1–7 的整数题"), true);
 
   const blocked = ecrBody(fours);
-  blocked.payload.assessmentId = "holland";
+  blocked.payload.assessmentId = "beattie";
   const rejected = await post({ handle }, "/v1/results", {
     result: blocked.payload, linkSecret: blocked.linkSecret, ownerToken: blocked.ownerToken,
   }, { ip: "203.0.113.120" });
@@ -1364,7 +1370,7 @@ function rootBody(answers, developmentAnswers, extra = {}, id = ids()) {
 }
 
 test("寻根之旅按三十三题和四道发展题重算后可保存，错误作答或未知测评仍是 422，已放行测评仍可保存", async () => {
-  assert.deepEqual(ALLOWED_ASSESSMENT_IDS, ["star", "sefs", "scl90", "pdq4", "ecr", "root"]);
+  assert.deepEqual(ALLOWED_ASSESSMENT_IDS, ["star", "sefs", "scl90", "pdq4", "ecr", "root", "loves5", "juying", "holland"]);
   const threes = Array(33).fill(3);
   const dev = [3, 3, 3, 3];
   const uniform = scoreRoot(threes);
@@ -1525,7 +1531,7 @@ test("寻根之旅按三十三题和四道发展题重算后可保存，错误�
   assert.equal(parentResult.body.issues.some((item) => item.includes("不能保存父母档案")), true);
 
   const blocked = rootBody(threes, dev);
-  blocked.payload.assessmentId = "holland";
+  blocked.payload.assessmentId = "5loves";
   const rejected = await post({ handle }, "/v1/results", {
     result: blocked.payload, linkSecret: blocked.linkSecret, ownerToken: blocked.ownerToken,
   }, { ip: "203.0.113.149" });
@@ -1577,3 +1583,286 @@ test("寻根之旅按三十三题和四道发展题重算后可保存，错误�
   }, { ip: "203.0.113.154" })).status, 200);
   assert.equal(store.size(), 6);
 });
+
+function lovesPicks(side = "left") {
+  return PAIRS.map((pair) => (side === "right" ? pair[1] : pair[0]));
+}
+
+function hollandTieBreak() {
+  const answers = Array(60).fill(1);
+  for (let block = 0; block < 10; block += 1) answers[block * 6] = 4;
+  for (let block = 0; block < 5; block += 1) answers[block * 6 + 1] = 5;
+  for (let block = 5; block < 10; block += 1) answers[block * 6 + 1] = 3;
+  return answers;
+}
+
+function lovesBody(picks, extra = {}, id = ids()) {
+  const payload = buildLoves5Result({
+    nickname: "小林",
+    picks,
+    completedAt: "2026-10-23T10:00:00+08:00",
+    ...extra,
+    ...id,
+  });
+  return { payload, ...id };
+}
+
+function juyingBody(answers, extra = {}, id = ids()) {
+  const payload = buildJuyingResult({
+    nickname: "小林",
+    answers,
+    completedAt: "2026-10-23T10:10:00+08:00",
+    ...extra,
+    ...id,
+  });
+  return { payload, ...id };
+}
+
+function hollandBody(answers, extra = {}, id = ids()) {
+  const payload = buildHollandResult({
+    nickname: "小林",
+    answers,
+    completedAt: "2026-10-23T10:20:00+08:00",
+    ...extra,
+    ...id,
+  });
+  return { payload, ...id };
+}
+
+test("爱的 5 种语言、巨婴测评和霍兰德按作答重算后可保存，飞书行仍写测评名称和分享链接", async () => {
+  const counts = { A: 0, B: 0, C: 0, D: 0, E: 0 };
+  for (const pair of PAIRS) {
+    counts[pair[0]] += 1;
+    counts[pair[1]] += 1;
+  }
+  assert.deepEqual(counts, { A: 12, B: 12, C: 12, D: 12, E: 12 });
+
+  const left = lovesPicks("left");
+  const right = lovesPicks("right");
+  const leftScore = scoreLoves5(left);
+  assert.equal(leftScore.total, 30);
+  assert.equal(Object.values(leftScore.scores).every((value) => value <= 12), true);
+  const rightScore = scoreLoves5(right);
+  assert.deepEqual(
+    LovesSum(leftScore.scores, rightScore.scores),
+    { A: 12, B: 12, C: 12, D: 12, E: 12 },
+  );
+
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock" });
+  const { handle, store, logs } = app({ feishu });
+  const loves = lovesBody(left, { rushed: true });
+  const lovesWire = JSON.parse(JSON.stringify(loves.payload));
+  assert.deepEqual(validateAssessmentResult(loves.payload), []);
+  assert.deepEqual(validateAssessmentResult(lovesWire), []);
+  assert.equal(loves.payload.assessmentId, "loves5");
+  assert.equal(loves.payload.assessmentVersion, "loves5-h5-v1");
+  assert.equal(loves.payload.assessmentName, "爱的 5 种语言");
+  assert.deepEqual(loves.payload.dimensions.map((item) => item.id), ["A", "B", "C", "D", "E"]);
+  assert.equal(loves.payload.dimensions.reduce((sum, item) => sum + item.score, 0), 30);
+  assert.equal(loves.payload.result.code, leftScore.primaries.join(""));
+  assert.equal(loves.payload.reportContent.viewModel.rushed, true);
+  const lovesSaved = await post({ handle }, "/v1/results", {
+    result: lovesWire, linkSecret: loves.linkSecret, ownerToken: loves.ownerToken,
+  }, { headers: { origin: "https://xiangshu3721.github.io" }, ip: "203.0.113.160" });
+  assert.equal(lovesSaved.status, 200);
+  assert.equal(feishu.rows[0]["测评 ID"], "loves5");
+  assert.equal(feishu.rows[0]["测评名称"], "爱的 5 种语言");
+  assert.equal(feishu.rows[0]["分享链接"], buildGithubShareUrl(loves.reportId, loves.linkSecret));
+  assert.equal(feishu.rows[0]["分享链接"].startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
+  assert.equal(feishu.rows[0]["分享链接"].includes("rpt_"), false);
+  assert.equal(JSON.stringify(feishu.rows[0]).includes(JSON.stringify(left)), false);
+  assert.equal(JSON.stringify(logs).includes(JSON.stringify(left)), false);
+
+  const badPick = lovesBody(left);
+  badPick.payload.reportContent.viewModel.picks = left.map((code, index) => (index === 0 ? "Z" : code));
+  badPick.payload.extensionData.answers = badPick.payload.reportContent.viewModel.picks.slice();
+  const badPickResult = await post({ handle }, "/v1/results", {
+    result: badPick.payload, linkSecret: badPick.linkSecret, ownerToken: badPick.ownerToken,
+  }, { ip: "203.0.113.161" });
+  assert.equal(badPickResult.status, 422);
+  assert.equal(badPickResult.body.issues.includes("作答需要 30 道二选一，每题只能是该题的语言码"), true);
+
+  const tampered = lovesBody(left);
+  tampered.payload.dimensions[0].score = 0;
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: tampered.payload, linkSecret: tampered.linkSecret, ownerToken: tampered.ownerToken,
+  }, { ip: "203.0.113.162" })).status, 422);
+  const renamed = lovesBody(left);
+  renamed.payload.assessmentName = "五种爱语";
+  assert.equal(validateAssessmentResult(renamed.payload).includes("测评名称不对"), true);
+  assert.equal(lovesBody(left.slice(0, 29)).payload, null);
+  assert.equal(buildLoves5Result({
+    nickname: "13800138000",
+    picks: left,
+    completedAt: "2026-10-23T10:00:00+08:00",
+    ...ids(),
+  }), null);
+
+  const bands = [
+    [Array(20).fill(0), "mature", "心智成熟", 0],
+    [Array(20).fill(2), "mature", "心智成熟", 40],
+    [Array(20).fill(2).map((value, index) => (index === 0 ? 3 : value)), "partial", "有部分巨婴特质", 41],
+    [Array(20).fill(3).map((value, index) => (index === 0 ? 2 : value)), "partial", "有部分巨婴特质", 59],
+    [Array(20).fill(3), "infant", "巨婴", 60],
+    [Array(20).fill(4), "infant", "巨婴", 80],
+    [Array(20).fill(4).map((value, index) => (index === 0 ? 5 : value)), "child", "儿童状态", 81],
+    [Array(20).fill(5), "child", "儿童状态", 100],
+  ];
+  for (const [answers, code, label, total] of bands) {
+    const scored = scoreJuying(answers);
+    assert.equal(scored.total, total);
+    assert.equal(scored.mind + scored.act, total);
+    assert.equal(scored.band.id, code);
+    assert.equal(scored.band.name, label);
+    const made = juyingBody(answers);
+    assert.deepEqual(validateAssessmentResult(JSON.parse(JSON.stringify(made.payload))), []);
+    assert.equal(made.payload.result.code, code);
+    assert.equal(made.payload.result.label, label);
+    assert.equal(made.payload.dimensions.map((item) => item.id).join(","), "total,mind,act");
+    const text = JSON.stringify(made.payload.interpretation.concat(made.payload.recommendations));
+    assert.equal(text.includes("不是诊断"), true);
+    assert.equal(text.includes("非严肃科学，仅供讲座听众理解学习。"), true);
+  }
+  const split = Array(10).fill(5).concat(Array(10).fill(0));
+  const splitScore = scoreJuying(split);
+  assert.equal(splitScore.mind, 50);
+  assert.equal(splitScore.act, 0);
+  assert.equal(splitScore.side.includes("心理特征比行为特征明显更高"), true);
+  const juying = juyingBody(split, { rushed: false });
+  const juyingSaved = await post({ handle }, "/v1/results", {
+    result: JSON.parse(JSON.stringify(juying.payload)),
+    linkSecret: juying.linkSecret,
+    ownerToken: juying.ownerToken,
+  }, { ip: "203.0.113.163" });
+  assert.equal(juyingSaved.status, 200);
+  assert.equal(feishu.rows[1]["测评 ID"], "juying");
+  assert.equal(feishu.rows[1]["测评名称"], "巨婴测评");
+  assert.equal(feishu.rows[1]["分享链接"], buildGithubShareUrl(juying.reportId, juying.linkSecret));
+  assert.equal(feishu.rows[1]["分享链接"].startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
+  const shortJuying = juyingBody(Array(20).fill(2));
+  shortJuying.payload.reportContent.viewModel.answers = Array(19).fill(2);
+  shortJuying.payload.extensionData.answers = Array(19).fill(2);
+  const shortJuyingResult = await post({ handle }, "/v1/results", {
+    result: shortJuying.payload, linkSecret: shortJuying.linkSecret, ownerToken: shortJuying.ownerToken,
+  }, { ip: "203.0.113.164" });
+  assert.equal(shortJuyingResult.status, 422);
+  assert.equal(shortJuyingResult.body.issues.includes("作答需要 20 道 0–5 的整数题"), true);
+  assert.equal(juyingBody(Array(20).fill(6)).payload, null);
+  const shifted = juyingBody(Array(20).fill(2));
+  shifted.payload.extensionData.score.total = 100;
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: shifted.payload, linkSecret: shifted.linkSecret, ownerToken: shifted.ownerToken,
+  }, { ip: "203.0.113.165" })).status, 422);
+
+  const flat = Array(60).fill(3);
+  const flatScore = scoreHolland(flat);
+  assert.equal(flatScore.holland_code, "RIA");
+  assert.deepEqual(flatScore.ranking, ["R", "I", "A", "S", "E", "C"]);
+  assert.deepEqual(flatScore.scores, { R: 50, I: 50, A: 50, S: 50, E: 50, C: 50 });
+  assert.equal(flatScore.structure.dominance, 0);
+  assert.equal(flatScore.structure.consistency, "HIGH");
+  assert.equal(flatScore.structure.breadth, 6);
+  assert.deepEqual(flatScore.bands, { dominance: "DUAL", differentiation: "LOW", breadth: "MANY" });
+  assert.deepEqual(flatScore.quality, ["LOW_VARIANCE", "MANY_UNSURE"]);
+  assert.equal(Object.hasOwn(flatScore, "median_ms"), false);
+  const tied = hollandTieBreak();
+  const tiedScore = scoreHolland(tied);
+  assert.equal(tiedScore.scores.R, 75);
+  assert.equal(tiedScore.scores.I, 75);
+  assert.equal(tiedScore.ranking[0], "I");
+  assert.equal(tiedScore.ranking[1], "R");
+  assert.equal(tiedScore.holland_code, "IRA");
+  const keyed = {};
+  flat.forEach((value, index) => {
+    keyed[`Q${String(index + 1).padStart(2, "0")}`] = value;
+  });
+  const holland = hollandBody(keyed, {
+    rushed: true,
+    explore: { q1: "写信", q2: ["做一个作品"], q2other: "", q3: ["更理解自己", "暂时只是好奇"] },
+  });
+  assert.equal(Array.isArray(holland.payload.reportContent.viewModel.answers), true);
+  assert.equal(holland.payload.reportContent.viewModel.answers.length, 60);
+  assert.equal(holland.payload.assessmentVersion, "holland-h5-v1");
+  assert.equal(holland.payload.result.code, "RIA");
+  assert.deepEqual(holland.payload.extensionData.score.structure, flatScore.structure);
+  assert.deepEqual(holland.payload.extensionData.score.bands, flatScore.bands);
+  assert.deepEqual(holland.payload.extensionData.score.ranking, flatScore.ranking);
+  assert.equal(holland.payload.extensionData.score.quality.includes("FAST_RESPONSE"), false);
+  assert.deepEqual(validateAssessmentResult(JSON.parse(JSON.stringify(holland.payload))), []);
+  const hollandSaved = await post({ handle }, "/v1/results", {
+    result: JSON.parse(JSON.stringify(holland.payload)),
+    linkSecret: holland.linkSecret,
+    ownerToken: holland.ownerToken,
+  }, { ip: "203.0.113.166" });
+  assert.equal(hollandSaved.status, 200);
+  assert.equal(feishu.rows[2]["测评 ID"], "holland");
+  assert.equal(feishu.rows[2]["测评名称"], "霍兰德兴趣探索");
+  assert.equal(feishu.rows[2]["分享链接"], buildGithubShareUrl(holland.reportId, holland.linkSecret));
+  assert.equal(feishu.rows[2]["分享链接"].startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
+  const read = await post({ handle }, "/v1/results/read", {
+    reportId: holland.reportId, linkSecret: holland.linkSecret,
+  }, { ip: "203.0.113.167" });
+  assert.equal(read.status, 200);
+  assert.equal(read.body.result.code, "RIA");
+  assert.equal(read.body.dimensions[0].id, "R");
+  assert.equal(read.body.dimensions[0].score, 50);
+
+  const shortHolland = hollandBody(flat);
+  shortHolland.payload.reportContent.viewModel.answers = flat.slice(0, 59);
+  shortHolland.payload.extensionData.answers = flat.slice(0, 59);
+  const shortHollandResult = await post({ handle }, "/v1/results", {
+    result: shortHolland.payload, linkSecret: shortHolland.linkSecret, ownerToken: shortHolland.ownerToken,
+  }, { ip: "203.0.113.168" });
+  assert.equal(shortHollandResult.status, 422);
+  assert.equal(shortHollandResult.body.issues.includes("作答需要 60 道 1–5 的整数题"), true);
+  const phoneExplore = hollandBody(flat);
+  phoneExplore.payload.reportContent.viewModel.explore.q1 = "13800138000";
+  phoneExplore.payload.extensionData.openText.q1 = "13800138000";
+  const phoneResult = await post({ handle }, "/v1/results", {
+    result: phoneExplore.payload, linkSecret: phoneExplore.linkSecret, ownerToken: phoneExplore.ownerToken,
+  }, { ip: "203.0.113.169" });
+  assert.equal(phoneResult.status, 422);
+  assert.equal(phoneResult.body.issues.some((item) => item.includes("不能保存手机号")), true);
+  assert.equal(hollandBody(Array(60).fill(0)).payload, null);
+  assert.equal(hollandBody(flat, { explore: { q1: "", q2: ["不在选项里"], q2other: "", q3: [] } }).payload, null);
+  const timed = hollandBody(flat);
+  timed.payload.extensionData.score.quality = ["FAST_RESPONSE"];
+  timed.payload.result.flags = ["FAST_RESPONSE"];
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: timed.payload, linkSecret: timed.linkSecret, ownerToken: timed.ownerToken,
+  }, { ip: "203.0.113.170" })).status, 422);
+
+  const blocked = lovesBody(left);
+  blocked.payload.assessmentId = "beattie";
+  const rejected = await post({ handle }, "/v1/results", {
+    result: blocked.payload, linkSecret: blocked.linkSecret, ownerToken: blocked.ownerToken,
+  }, { ip: "203.0.113.171" });
+  assert.equal(rejected.status, 422);
+  assert.equal(rejected.body.issues.includes("测评不在可保存范围内"), true);
+
+  const star = result();
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: star.payload, linkSecret: star.linkSecret, ownerToken: star.ownerToken,
+  }, { ip: "203.0.113.172" })).status, 200);
+  const root = buildRootResult({
+    nickname: "小林",
+    answers: Array(33).fill(3),
+    developmentAnswers: [3, 3, 3, 3],
+    completedAt: "2026-10-23T10:30:00+08:00",
+    ...ids(),
+  });
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: root, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.173" })).status, 200);
+  assert.equal(store.size(), 5);
+});
+
+function LovesSum(leftScores, rightScores) {
+  return {
+    A: leftScores.A + rightScores.A,
+    B: leftScores.B + rightScores.B,
+    C: leftScores.C + rightScores.C,
+    D: leftScores.D + rightScores.D,
+    E: leftScores.E + rightScores.E,
+  };
+}
