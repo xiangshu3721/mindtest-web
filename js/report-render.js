@@ -1,3 +1,6 @@
+import { renderHollandReport as renderHollandMap } from "./holland-report.js";
+import { JUYING_BAND_COPY, JUYING_GROUPS, JUYING_REFERENCE_INTRO } from "./juying-bands.js";
+
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -22,6 +25,16 @@ function when(value) {
   }).format(date);
 }
 
+const STAR_DRIVE_SLOTS = ["at-ul", "at-ur", "at-bot"];
+const STAR_PURSUE_SLOTS = ["at-top", "at-ll", "at-lr"];
+
+function starTags(list, role, slots) {
+  return (list || []).map((word, index) => {
+    const slot = slots[index] || slots[slots.length - 1];
+    return `<span class="tag ${role} ${slot}"><span class="ink">${esc(word)}</span></span>`;
+  }).join("");
+}
+
 export function renderStarReport(report) {
   const drive = report.reportContent?.viewModel?.driveOrder || report.dimensions?.find((item) => item.id === "drive")?.labels || [];
   const pursue = report.reportContent?.viewModel?.pursueOrder || report.dimensions?.find((item) => item.id === "pursue")?.labels || [];
@@ -30,26 +43,35 @@ export function renderStarReport(report) {
     .map((item) => item && item.text)
     .filter(Boolean);
   return `
-    <p class="read-note">这是同一份结果的阅读页。词的顺序和交卷时一样，这里不能改。</p>
-    <figure class="plate">
-      <svg class="mark" viewBox="0 0 100 100" aria-hidden="true">
-        <polygon class="up" points="50,8 86.4,71 13.6,71" />
-        <polygon class="down" points="50,92 13.6,29 86.4,29" />
-      </svg>
-      <figcaption>职业六芒星</figcaption>
-    </figure>
-    <section class="roster">
-      <div>
-        <h2 class="drive-name">底层动力</h2>
-        <ol>${words(drive)}</ol>
+    <div class="star-map">
+      <div class="capture">
+        <figure class="plate">
+          <p class="aside drive">底层动力</p>
+          <p class="aside pursue">现实追求</p>
+          <div class="sky">
+            <svg class="mark" viewBox="0 0 100 100" aria-hidden="true">
+              <polygon class="up" points="50,8 86.4,71 13.6,71" />
+              <polygon class="down" points="50,92 13.6,29 86.4,29" />
+            </svg>
+            ${starTags(drive, "drive", STAR_DRIVE_SLOTS)}
+            ${starTags(pursue, "pursue", STAR_PURSUE_SLOTS)}
+          </div>
+          <h1 class="spine">职业六芒星</h1>
+        </figure>
+        <section class="roster">
+          <div>
+            <h2 class="drive-name">底层动力</h2>
+            <ul>${words(drive)}</ul>
+          </div>
+          <div>
+            <h2 class="pursue-name">现实追求</h2>
+            <ul>${words(pursue)}</ul>
+          </div>
+        </section>
       </div>
-      <div>
-        <h2 class="pursue-name">现实追求</h2>
-        <ol>${words(pursue)}</ol>
-      </div>
-    </section>
-    <ul class="notes">${notes.map((text) => `<li>${esc(text)}</li>`).join("")}</ul>
-    <p class="meta">${esc(report.nickname)} · ${esc(when(report.completedAt))} · ${esc(report.assessmentVersion)}</p>
+      ${notes.length ? `<ul class="notes">${notes.map((text) => `<li>${esc(text)}</li>`).join("")}</ul>` : ""}
+      <p class="meta">${esc(report.nickname)} · ${esc(when(report.completedAt))} · ${esc(report.assessmentVersion)}</p>
+    </div>
   `;
 }
 
@@ -368,39 +390,44 @@ export function renderSefsReport(report) {
   const model = readSefs(report || {});
   const radar = radarSvg(model.slots);
   const cards = model.slots.map((slot) => `
-    <article class="sefs-dim">
-      <div class="sefs-dim-head">
-        <h3>${esc(slot.name)}</h3>
-        <p class="sefs-score">${esc(showNum(slot.score))} <small>/ ${esc(showNum(slot.max))}</small></p>
+    <article class="dim-card">
+      <div class="dim-head">
+        <div class="dim-title">${esc(slot.name)}</div>
+        <div class="dim-score">${esc(showNum(slot.score))} <small>/ ${esc(showNum(slot.max))}</small></div>
       </div>
-      <div class="sefs-track"><div class="sefs-fill" style="width:${barWidth(slot).toFixed(1)}%;background:${slot.color}"></div></div>
-      <p class="sefs-dim-meta"><span>${esc(slot.brief)}</span><span>${esc(levelText(slot))}</span></p>
+      <div class="mini-track"><div class="mini-fill" style="width:${barWidth(slot).toFixed(1)}%;--tone:${slot.color}"></div></div>
+      <div class="dim-meta"><span>${esc(slot.brief)}</span><span>${esc(levelText(slot))}</span></div>
     </article>
   `).join("");
   const totalBlock = model.total == null
     ? `<p class="state">这份结果里没有可显示的分数。</p>`
-    : `<section class="sefs-total">
-        <p class="sefs-total-num"><strong>${esc(showNum(model.total))}</strong><span> / ${esc(showNum(model.maxTotal))}</span></p>
-        <p class="sefs-total-label">四个维度总计</p>
-        ${model.totalLine ? `<p>${esc(model.totalLine)}</p>` : ""}
-      </section>`;
+    : `<div class="score-hero">
+        <div>
+          <div class="total-number"><span>${esc(showNum(model.total))}</span><small> / ${esc(showNum(model.maxTotal))}</small></div>
+          <p class="total-label">四个维度总计</p>
+        </div>
+        ${model.totalLine ? `<p class="score-copy">${esc(model.totalLine)}</p>` : ""}
+      </div>`;
   return `
-    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
-    <h2 class="sefs-name">${esc(model.name)}</h2>
-    <p class="sefs-kicker">你的主观体验地图。这些数字只是一次观察，不能定义完整的你。</p>
-    ${totalBlock}
-    <h2 class="sefs-section">四个维度，四种体验</h2>
-    ${radar ? `<figure class="plate">${radar}</figure>` : ""}
-    <section class="sefs-dims">${cards}</section>
-    <section class="sefs-insight">
-      <p class="sefs-tag">${esc(model.tag)}</p>
-      ${model.lead ? `<h3>${esc(model.lead)}</h3>` : ""}
-      ${model.summary ? `<p>${esc(model.summary)}</p>` : ""}
-      ${model.paragraphs.map(paragraphHtml).join("")}
-      ${model.order ? `<p class="sefs-order">${esc(model.order)}</p>` : ""}
-    </section>
-    ${model.notice ? `<p class="sefs-notice">${esc(model.notice)}</p>` : ""}
-    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    <div class="sefs-map">
+      <p class="eyebrow">YOUR EXPERIENCE MAP</p>
+      <h1 class="result-title">你的主观体验地图</h1>
+      <p class="result-sub">这些数字只是一次观察，不能定义完整的你。</p>
+      <p class="sefs-scale">${esc(model.name)}</p>
+      ${totalBlock}
+      <h2 class="h2">四个维度，四种体验</h2>
+      ${radar ? `<div class="radar-wrap">${radar}</div>` : ""}
+      <div class="dim-grid">${cards}</div>
+      <div class="insight">
+        <span class="tag">${esc(model.tag)}</span>
+        ${model.lead ? `<h3>${esc(model.lead)}</h3>` : ""}
+        ${model.summary ? `<p>${esc(model.summary)}</p>` : ""}
+        ${model.paragraphs.map(paragraphHtml).join("")}
+        ${model.order ? `<p class="sefs-order">${esc(model.order)}</p>` : ""}
+      </div>
+      ${model.notice ? `<p class="notice">${esc(model.notice)}</p>` : ""}
+      <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    </div>
   `;
 }
 
@@ -969,14 +996,18 @@ function readScl90(report) {
 
 function sclStats(model) {
   const items = [];
-  if (model.total.present) items.push(["总分", showCount(model.total.value)]);
-  if (model.positiveCount.present) items.push(["阳性项目", showCount(model.positiveCount.value)]);
-  if (model.negativeCount.present) items.push(["阴性项目", showCount(model.negativeCount.value)]);
-  if (model.positiveMean.present) items.push(["阳性症状均分", model.positiveMean.value == null ? "—" : fixed2(model.positiveMean.value)]);
+  if (model.gsi.present) {
+    const label = `总症状指数${model.gsiLabel ? ` · ${model.gsiLabel}` : ""}`;
+    items.push([label, fixed2(model.gsi.value), true]);
+  }
+  if (model.total.present) items.push(["总分", showCount(model.total.value), false]);
+  if (model.positiveCount.present) items.push(["阳性项目", showCount(model.positiveCount.value), false]);
+  if (model.negativeCount.present) items.push(["阴性项目", showCount(model.negativeCount.value), false]);
+  if (model.positiveMean.present) items.push(["阳性症状均分", model.positiveMean.value == null ? "—" : fixed2(model.positiveMean.value), false]);
   if (!items.length) return "";
-  return `<section class="scl-stats">${items.map(([label, value]) => `
-    <div class="scl-stat"><b>${esc(value)}</b><span>${esc(label)}</span></div>
-  `).join("")}</section>`;
+  return `<div class="metrics">${items.map(([label, value, gsi]) => `
+    <div class="metric">${gsi ? `<strong>${esc(value)}</strong>` : `<b>${esc(value)}</b>`}<span>${esc(label)}</span></div>
+  `).join("")}</div>`;
 }
 
 function sclFactors(factors) {
@@ -993,17 +1024,22 @@ function sclFactors(factors) {
       ? `因子总分 ${showCount(slot.raw)} / ${showCount(slot.count)} 题`
       : "";
     const foot = [raw, norm].filter(Boolean).join(" · ");
+    const normTick = slot.normMean != null
+      ? `<i class="norm" style="left:${sclBar({ score: slot.normMean, max: slot.max }).toFixed(1)}%"></i>`
+      : "";
     return `
-      <article class="sefs-dim">
-        <div class="sefs-dim-head">
+      <section class="factor">
+        <header>
           <h3>${esc(slot.name)}</h3>
-          <p class="sefs-score${scoreClass}">${esc(fixed2(slot.score))} <small>/ ${esc(showCount(slot.max))}</small></p>
-        </div>
-        <div class="sefs-track" aria-hidden="true"><div class="sefs-fill${fillClass}" style="width:${sclBar(slot).toFixed(1)}%"></div></div>
-        ${metaLeft || metaRight ? `<p class="sefs-dim-meta"><span>${esc(metaLeft)}</span><span>${esc(metaRight)}</span></p>` : ""}
-        ${foot ? `<p class="scl-foot">${esc(foot)}</p>` : ""}
-        ${slot.narrative ? `<p class="scl-narrative">${esc(slot.narrative)}</p>` : ""}
-      </article>
+          <span class="level ${esc(level)}${scoreClass}">${esc([slot.levelLabel, fixed2(slot.score)].filter((part) => part && part !== "—").join(" · "))}${slot.score != null ? ` <small>/ ${esc(showCount(slot.max))}</small>` : ""}</span>
+        </header>
+        ${slot.about ? `<em class="about">${esc(slot.about)}</em>` : ""}
+        <div class="bar" aria-hidden="true"><b class="${esc(level)}${fillClass}" style="width:${sclBar(slot).toFixed(1)}%"></b><i class="cut" style="left:${sclBar({ score: 2, max: slot.max || 5 }).toFixed(1)}%"></i>${normTick}</div>
+        ${foot ? `<div class="scale-note">${esc(foot)}</div>` : ""}
+        ${metaLeft && metaLeft !== slot.about ? `<p class="sub">${esc(metaLeft)}</p>` : ""}
+        ${metaRight ? `<p class="sub">${esc(metaRight)}</p>` : ""}
+        ${slot.narrative ? `<p>${esc(slot.narrative)}</p>` : ""}
+      </section>
     `;
   }).join("");
 }
@@ -1011,30 +1047,24 @@ function sclFactors(factors) {
 export function renderScl90Report(report) {
   const model = readScl90(report || {});
   const crisis = model.crisis
-    ? `<aside class="scl-crisis ${model.crisis.level === "note" ? "scl-crisis-note" : "scl-crisis-hot"}" role="${model.crisis.level === "note" ? "note" : "alert"}">
+    ? `<div class="verdict ${model.crisis.level === "note" ? "scl-crisis scl-crisis-note" : "urgent scl-crisis scl-crisis-hot"}" role="${model.crisis.level === "note" ? "note" : "alert"}">
         <strong>${esc(model.crisis.title)}</strong>
         <p>${esc(model.crisis.text)}</p>
-      </aside>`
+      </div>`
     : "";
   const rush = model.rushed
-    ? `<p class="scl-rush"><strong>作答偏快。</strong>超过一半的题目间隔不到 1.5 秒。下面的分数仍然按作答计算，但可能没有反映最近一周的实际感觉。</p>`
+    ? `<div class="verdict positive scl-rush"><strong>作答偏快</strong><p>超过一半的题目间隔不到 1.5 秒。下面的分数仍然按作答计算，但可能没有反映最近一周的实际感觉。</p></div>`
     : "";
   const verdict = model.verdictTitle
-    ? `<p class="scl-tag${model.verdictTitle.includes("阳性") ? " scl-tag-pos" : ""}">${esc(model.verdictTitle)}</p>`
-    : "";
-  const hero = model.gsi.present
-    ? `<section class="sefs-total">
-        <p class="sefs-total-num"><strong>${esc(fixed2(model.gsi.value))}</strong></p>
-        <p class="sefs-total-label">总症状指数${model.gsiLabel ? ` · ${esc(model.gsiLabel)}` : ""}</p>
-      </section>`
-    : "";
+    ? `<div class="verdict${model.verdictTitle.includes("阳性") ? " positive scl-tag-pos" : ""}"><strong>${esc(model.verdictTitle)}</strong>${model.verdictText ? `<p>${esc(model.verdictText)}</p>` : ""}</div>`
+    : (model.verdictText ? `<p class="lead">${esc(model.verdictText)}</p>` : "");
   const rules = model.rules.length
-    ? `<ul class="scl-rules">${model.rules.map((rule) => `
-        <li><span class="scl-pill${rule.hit ? " scl-pill-hit" : ""}">${rule.hit ? "超过" : "未超过"}</span><span><strong>${esc(rule.label)}</strong>${rule.detail ? `<br />${esc(rule.detail)}` : ""}</span></li>
+    ? `<ul class="rules scl-rules">${model.rules.map((rule) => `
+        <li><span class="${rule.hit ? "scl-pill-hit" : "scl-pill"}">${rule.hit ? "超过" : "未超过"}</span><span><strong>${esc(rule.label)}</strong>${rule.detail ? `<br />${esc(rule.detail)}` : ""}</span></li>
       `).join("")}</ul>`
     : "";
   const guidance = model.guidance.length
-    ? `<section class="sefs-insight"><h2 class="sefs-section">怎么看下一步</h2><ul class="scl-guidance">${model.guidance.map((line) => `<li>${esc(line)}</li>`).join("")}</ul></section>`
+    ? `<h2>怎么看下一步</h2><ul class="guidance scl-guidance">${model.guidance.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>`
     : "";
   const extra = model.interpretation.concat(model.leftover);
   const extraHtml = extra.length
@@ -1043,10 +1073,10 @@ export function renderScl90Report(report) {
   let notable = "";
   if (model.notable) {
     notable = model.notable.length
-      ? `<details class="scl-ledger"><summary>偏重和严重的条目（${model.notable.length}）</summary><ul class="scl-symptoms">${model.notable.map((item) => `
+      ? `<h2>偏重和严重的条目（${model.notable.length}）</h2><ul class="symptoms scl-symptoms">${model.notable.map((item) => `
           <li><b>${item.n == null ? "" : esc(String(item.n).padStart(2, "0"))}</b><span>${esc(item.text)}</span><span>${esc(optionWord(item.score))}</span></li>
-        `).join("")}</ul></details>`
-      : `<p class="scl-sub">没有题目达到偏重或严重。</p>`;
+        `).join("")}</ul>`
+      : `<h2>偏重和严重的条目</h2><p class="sub">没有题目达到偏重或严重。</p>`;
   }
   const seenLead = new Set();
   const takeLead = (lines) => lines.filter(Boolean).filter((line) => {
@@ -1056,29 +1086,42 @@ export function renderScl90Report(report) {
   });
   const before = takeLead([model.headline, model.verdictText]);
   const after = takeLead([model.gsiText, model.above, model.norms]);
+  const whoParts = model.who ? model.who.split(" · ") : [];
+  const whoLabels = whoParts.length === 4 ? ["姓名", "性别", "年龄", "日期"] : (whoParts.length === 3 ? ["姓名", "性别", "年龄"] : []);
+  const who = model.who
+    ? `<p class="who-flat" hidden>${esc(model.who)}</p>${whoLabels.length ? `<div class="who">${whoParts.map((part, index) => `<div><span>${whoLabels[index]}</span><b>${esc(part)}</b></div>`).join("")}</div>` : ""}`
+    : "";
   return `
-    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
-    <h2 class="sefs-name">${esc(model.name)}</h2>
-    <p class="sefs-kicker">最近一周的感受筛查。筛查不是诊断。</p>
-    ${model.who ? `<p class="scl-who">${esc(model.who)}</p>` : ""}
-    ${crisis}
-    ${rush}
-    ${verdict}
-    ${before.map((line) => `<p class="scl-lead">${esc(line)}</p>`).join("")}
-    ${model.youth ? `<p class="scl-sub">${esc(model.youth)}</p>` : ""}
-    ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
-    ${hero}
-    ${sclStats(model)}
-    ${after.map((line) => `<p class="scl-lead">${esc(line)}</p>`).join("")}
-    ${rules}
-    <h2 class="sefs-section">十个方面</h2>
-    <p class="scl-scale">横条左端 1 分，右端 5 分。2 分及以下为无明显症状，其后到 3 分为轻度，到 4 分为中度，再高为重度。</p>
-    <section class="sefs-dims">${sclFactors(model.factors)}</section>
-    ${guidance}
-    ${extraHtml}
-    ${notable}
-    ${model.notice ? `<p class="sefs-notice">${esc(model.notice)}</p>` : ""}
-    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    <div class="scl-map">
+      <p class="kicker"><i class="mark"></i> 测评报告</p>
+      <h1>症状自评量表</h1>
+      <p class="scl-scale-name">${esc(model.name)}</p>
+      <p class="sub">最近一周的感受筛查。筛查不是诊断。</p>
+      ${who}
+      ${crisis}
+      ${rush}
+      ${verdict}
+      ${before.filter((line) => line !== model.verdictText).map((line) => `<p class="lead">${esc(line)}</p>`).join("")}
+      ${model.youth ? `<p class="sub">${esc(model.youth)}</p>` : ""}
+      ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
+      ${sclStats(model)}
+      ${after.map((line) => `<p class="sub">${esc(line)}</p>`).join("")}
+      ${rules}
+      <h2>十个方面</h2>
+      <p class="sub">横条是因子均分，左端 1 分，右端 5 分。黑线是 2 分筛查界，灰线是常模均分。2 分及以下为无明显症状，其后到 3 分为轻度，到 4 分为中度，再高为重度。</p>
+      ${sclFactors(model.factors)}
+      ${guidance}
+      ${extraHtml}
+      ${notable}
+      <div class="formulas">
+        <p>总分 = 90 题相加。总症状指数 = 总分 ÷ 90。</p>
+        <p>阳性项目 = 选了很轻及以上的题。阴性项目 = 选了「没有」的题。阳性症状均分 = 阳性题得分之和 ÷ 阳性题数。</p>
+        <p>因子均分 = 该因子题目得分之和 ÷ 题目数。筛查阳性：总分超过 160，或阳性项目超过 43，或九个症状因子里有均分超过 2。</p>
+        <p>这是筛查，不是诊断，也不能代替面谈。</p>
+      </div>
+      ${model.notice ? `<p class="notice">${esc(model.notice)}</p>` : ""}
+      <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    </div>
   `;
 }
 
@@ -1318,18 +1361,19 @@ function pdqScaleArticle(slot) {
     ? `${esc(slot.name)}<span class="pdq-alias"> · ${esc(slot.alias)}</span>`
     : esc(slot.name);
   return `
-    <article class="sefs-dim${hit ? " pdq-hit" : ""}">
-      <div class="sefs-dim-head">
+    <section class="factor${hit ? " pdq-hit" : ""}">
+      <header>
         <h3>${name}</h3>
-        <p class="sefs-score">${esc(showNum(slot.score))} <small>/ ${esc(showNum(slot.max))}</small></p>
+        <span class="sefs-score">${esc(showNum(slot.score))} <small>/ ${esc(showNum(slot.max))}</small></span>
+      </header>
+      <em class="about">${esc(slot.about)}</em>
+      <div class="bar pdq-track" aria-hidden="true">
+        <b style="width:${pdqBar(slot).toFixed(1)}%"></b>
+        ${cutLeft == null ? "" : `<i class="cut" style="left:${cutLeft.toFixed(1)}%"></i>`}
       </div>
-      <div class="sefs-track pdq-track" aria-hidden="true">
-        <div class="sefs-fill pdq-fill" style="width:${pdqBar(slot).toFixed(1)}%"></div>
-        ${cutLeft == null ? "" : `<i class="pdq-cut" style="left:${cutLeft.toFixed(1)}%"></i>`}
-      </div>
-      <p class="sefs-dim-meta"><span>${esc(slot.about)}</span><span>${esc(meta)}</span></p>
+      <p class="sub">${esc(meta)}</p>
       ${hit && slot.portrait ? `<p class="pdq-portrait">${esc(slot.portrait)}</p>` : ""}
-    </article>
+    </section>
   `;
 }
 
@@ -1337,15 +1381,15 @@ function validityArticle(label, block, calm, caution) {
   const mark = block.flagged == null ? "—" : (block.flagged ? "需要留意" : "未触发");
   const detail = block.detail || (block.flagged == null ? "这项效度没有随结果一起送来。" : (block.flagged ? caution : calm));
   const items = block.items.length && !detail.includes("题号") ? `记分题号：${block.items.join("、")}。` : "";
+  const scoreLine = `${label} ${showNum(block.score)} / ${showNum(block.max)}`;
   return `
-    <article class="${block.flagged ? "pdq-valid-on" : ""}">
-      <div class="sefs-dim-head">
+    <section class="factor${block.flagged ? " pdq-valid-on" : ""}">
+      <header>
         <h3>${esc(label)}</h3>
-        <p class="sefs-score">${esc(showNum(block.score))} <small>/ ${esc(showNum(block.max))}</small></p>
-      </div>
-      <p class="pdq-flag${block.flagged ? " pdq-flag-on" : ""}">${esc(mark)}</p>
-      <p>${esc(detail)}${items ? ` ${esc(items)}` : ""}</p>
-    </article>
+        <span class="sefs-score">${esc(showNum(block.score))} <small>/ ${esc(showNum(block.max))}</small></span>
+      </header>
+      <p><strong>${esc(scoreLine)}</strong> · ${esc(mark)}。${esc(detail)}${items ? ` ${esc(items)}` : ""}</p>
+    </section>
   `;
 }
 
@@ -1462,31 +1506,46 @@ export function renderPdq4Report(report) {
   const extra = model.interpretation.length
     ? `<section class="sefs-insight">${model.interpretation.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
     : "";
+  const impulseLine = model.impulse.present
+    ? `<p>边缘型的冲动分：第 106–111 题里至少 2 个「是」，整组记 1 分，否则记 0 分。这次是 ${esc(showNum(model.impulse.count))} 个「是」，记 ${esc(showNum(model.impulse.point))} 分。</p>`
+    : "";
+  const conductLine = model.conduct.present
+    ? `<p>反社会型的早年行为：第 112–126 题里至少 3 个「是」，整组记 1 分，否则记 0 分。这次是 ${esc(showNum(model.conduct.count))} 个「是」，记 ${esc(showNum(model.conduct.point))} 分。</p>`
+    : "";
   return `
-    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
-    <h2 class="sefs-name">${esc(model.name)}</h2>
-    <p class="sefs-kicker">筛查不是诊断。达到划界只说明值得再了解，不能代替面谈。</p>
-    ${model.verdict.title ? `<h3 class="pdq-verdict">${esc(model.verdict.title)}</h3>` : ""}
-    ${model.verdict.text ? `<p class="scl-lead">${esc(model.verdict.text)}</p>` : ""}
-    ${model.hitLine ? `<p class="scl-lead">${esc(model.hitLine)}</p>` : ""}
-    ${model.rushed ? `<p class="scl-rush"><strong>作答偏快。</strong>超过一半的间隔不到 1.5 秒，分数仍按选择计算。</p>` : ""}
-    ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
-    <section class="scl-stats">
-      <div class="scl-stat"><b>${esc(showNum(model.positiveCount))}</b><span>达到划界</span></div>
-      <div class="scl-stat"><b>${esc(showNum(model.total.present ? model.total.value : null))}</b><span>十二维合计</span></div>
-    </section>
-    ${totalNote ? `<p class="scl-sub">${esc(totalNote)}</p>` : ""}
-    <h2 class="sefs-section">作答效度</h2>
-    <p class="scl-sub">掩饰和怀疑不计入十二个维度。先看这里，再看分量表。</p>
-    <section class="pdq-valid">
-      ${validityArticle("掩饰", model.tooGood, "没有达到掩饰划界。第 12、25、38 题答「否」，或第 51 题答「是」，才会记入这一项。", "有几道几乎人人都会承认的小题被否认了，回答可能偏完美。分数仍然列出，卷面可能比实际更轻。")}
-      ${validityArticle("怀疑", model.suspect, "第 64 题和第 76 题都没有答「是」，这次没有按可疑处理。", "有题目提示这份问卷可疑。分数照常列出，请先看效度，再决定要不要把它们当作参考。")}
-    </section>
-    ${clusters}
-    ${notes.length ? `<section class="sefs-insight">${notes.map((line) => `<p class="scl-sub">${esc(line)}</p>`).join("")}</section>` : ""}
-    ${guidance}
-    ${extra}
-    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    <div class="pdq-map">
+      <p class="kicker">测评结果${model.completedAt ? ` · ${esc(when(model.completedAt))}` : ""}</p>
+      <h1>${esc(model.verdict.title || model.name)}</h1>
+      ${model.verdict.title ? `<p class="sub">${esc(model.name)}</p>` : ""}
+      <p class="sub">筛查不是诊断。达到划界只说明值得再了解，不能代替面谈。</p>
+      ${model.verdict.text ? `<p class="lead">${esc(model.verdict.text)}</p>` : ""}
+      ${model.hitLine ? `<p class="lead">${esc(model.hitLine)}</p>` : ""}
+      ${model.rushed ? `<p class="lead quiet scl-rush"><strong>作答偏快。</strong>超过一半的间隔不到 1.5 秒，分数仍按选择计算。</p>` : ""}
+      ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
+      <div class="metrics">
+        <div class="metric"><b>${esc(showNum(model.positiveCount))}</b><span>达到划界</span></div>
+        <div class="metric"><b>${esc(showNum(model.total.present ? model.total.value : null))}</b><span>十二维合计</span></div>
+      </div>
+      ${totalNote ? `<p class="sub">${esc(totalNote)}</p>` : ""}
+      <h2>作答效度</h2>
+      <p class="sub">掩饰和怀疑不计入十二个维度。先看这里，再看分量表。</p>
+      <section class="pdq-valid">
+        ${validityArticle("掩饰", model.tooGood, "没有达到掩饰划界。第 12、25、38 题答「否」，或第 51 题答「是」，才会记入这一项。", "有几道几乎人人都会承认的小题被否认了，回答可能偏完美。分数仍然列出，卷面可能比实际更轻。")}
+        ${validityArticle("怀疑", model.suspect, "第 64 题和第 76 题都没有答「是」，这次没有按可疑处理。", "有题目提示这份问卷可疑。分数照常列出，请先看效度，再决定要不要把它们当作参考。")}
+      </section>
+      ${clusters}
+      <div class="formulas">
+        <p>临床题答「是」记 1 分，答「否」记 0 分。各维度把自己的题目相加，大于等于划界分即为筛查阳性。</p>
+        <p>反社会型划界 3 分。偏执型、分裂样、回避型、强迫型、被动攻击型划界 4 分。分裂型、表演型、自恋型、边缘型、依赖型、抑郁型划界 5 分。</p>
+        ${impulseLine}
+        ${conductLine}
+        <p>第 98–105 题保留在问卷中，不计入这 12 个分量表。掩饰和怀疑的 6 题也不计入。这是筛查，不是诊断。</p>
+      </div>
+      ${notes.length ? `<section class="notes">${notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>` : ""}
+      ${guidance}
+      ${extra}
+      <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    </div>
   `;
 }
 
@@ -1812,20 +1871,52 @@ function ecrDimArticle(slot) {
     : (slot.sum != null ? `合计 ${showCount(slot.sum)}` : "");
   const narrative = slot.narrative && slot.narrative !== slot.about ? slot.narrative : "";
   return `
-    <article class="sefs-dim">
-      <div class="sefs-dim-head">
+    <section class="factor">
+      <header>
         <h3>${esc(slot.name)}</h3>
-        <p class="sefs-score${levelClass}">${esc(fixed2(slot.score))} <small>/ ${esc(showCount(slot.max))}</small></p>
+        <span class="sefs-score${levelClass}">${esc(fixed2(slot.score))} <small>/ ${esc(showCount(slot.max))}</small></span>
+      </header>
+      <em class="about">${esc(slot.about)}</em>
+      <div class="bar ecr-track" aria-hidden="true">
+        <b style="width:${ecrBar(slot).toFixed(1)}%"></b>
+        <i style="left:50%"></i>
       </div>
-      <div class="sefs-track ecr-track" aria-hidden="true">
-        <div class="sefs-fill ecr-fill" style="width:${ecrBar(slot).toFixed(1)}%"></div>
-        <i class="pdq-cut" style="left:50%"></i>
-      </div>
-      <p class="sefs-dim-meta"><span>${esc(slot.about)}</span><span>${esc(slot.levelLabel)}</span></p>
-      ${narrative ? `<p class="scl-narrative">${esc(narrative)}</p>` : ""}
+      ${narrative ? `<p>${esc(narrative)}</p>` : ""}
+      ${slot.levelLabel ? `<p class="sub">${esc(slot.levelLabel)}</p>` : ""}
       ${foot ? `<p class="scl-foot">${esc(foot)}</p>` : ""}
-    </article>
+    </section>
   `;
+}
+
+function ecrPlane(model) {
+  const avoid = model.dimensions[0];
+  const anxiety = model.dimensions[1];
+  if (!avoid || !anxiety || avoid.score == null || anxiety.score == null) return "";
+  const x = Math.max(0, Math.min(100, ((avoid.score - 1) / 6) * 100));
+  const y = Math.max(0, Math.min(100, ((anxiety.score - 1) / 6) * 100));
+  return `
+    <div class="plane" style="--x:${x.toFixed(1)}%;--y:${y.toFixed(1)}%" role="img" aria-label="回避 ${esc(fixed2(avoid.score))}，焦虑 ${esc(fixed2(anxiety.score))}">
+      <div class="plot"><b class="dot"></b></div>
+      <span class="axis-x">回避</span>
+      <span class="axis-y">焦虑</span>
+    </div>
+    <p class="fine plane-note">十字是量表中点，不是分型的切线。点越靠右回避越高，越靠上焦虑越高。</p>
+  `;
+}
+
+function ecrMetrics(model) {
+  return `<div class="metrics">${model.dimensions.map((slot) => `
+    <div class="metric">
+      <strong>${esc(fixed2(slot.score))}</strong>
+      <span>${esc(slot.name)}</span>
+      <em>${esc(slot.levelLabel || "—")}${slot.sum != null ? ` · 总分 ${esc(showCount(slot.sum))}` : ""}</em>
+    </div>
+  `).join("")}</div>`;
+}
+
+function ecrAxis(model) {
+  if (model.dimensions.some((slot) => slot.score == null || !slot.levelLabel)) return "";
+  return `${model.dimensions.map((slot) => `${slot.name} ${fixed2(slot.score)}，${slot.levelLabel}`).join("。")}。中点是 4 分。`;
 }
 
 function ecrTypeArticle(type) {
@@ -1931,33 +2022,51 @@ function readEcr(report) {
 export function renderEcrReport(report) {
   const model = readEcr(report || {});
   const heading = model.type.name || model.scaleName;
-  const who = model.type.name ? `<p class="scl-who">${esc(model.scaleName)}</p>` : "";
+  const who = model.type.name ? `<p class="sub">${esc(model.scaleName)}</p>` : "";
+  const axis = ecrAxis(model);
   const notes = model.notes.length
-    ? `<section class="sefs-insight">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    ? `<div class="notes">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</div>`
     : "";
   const extra = model.extra.length
     ? `<section class="sefs-insight">${model.extra.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
     : "";
   return `
-    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
-    ${who}
-    <h2 class="sefs-name">${esc(heading)}</h2>
-    <p class="sefs-kicker">${esc(ECR_KICKER)}</p>
-    ${model.type.short ? `<p class="scl-lead">${esc(model.type.short)}</p>` : ""}
-    ${model.type.text ? `<p>${esc(model.type.text)}</p>` : ""}
-    ${model.type.name ? "" : `<p class="state">这份结果里没有可显示的类型。</p>`}
-    ${notes}
-    ${model.rushed ? `<p class="scl-rush"><strong>作答偏快。</strong>超过一半的题目间隔不到 1.5 秒。下面的分数仍然按作答计算。</p>` : ""}
-    ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
-    <h2 class="sefs-section">回避和焦虑</h2>
-    <p class="scl-sub">均分从 1 到 7，4 是量表中点，不是诊断界值。横条上的刻度落在中点。</p>
-    <section class="sefs-dims">${model.dimensions.map(ecrDimArticle).join("")}</section>
-    <h2 class="sefs-section">四个判别分</h2>
-    <p class="scl-sub">回避均分记为 A，焦虑均分记为 B。类型取最高的一项。</p>
-    <ol class="ecr-types">${model.types.map(ecrTypeArticle).join("")}</ol>
-    ${extra}
-    ${model.notice ? `<p class="sefs-notice">${esc(model.notice)}</p>` : ""}
-    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    <div class="ecr-map">
+      <p class="kicker">测评结果</p>
+      ${who}
+      <h1 class="sefs-name">${esc(heading)}</h1>
+      <p class="sub">${esc(ECR_KICKER)}</p>
+      ${model.type.short ? `<p class="ename">${esc(model.type.short)}</p>` : ""}
+      ${axis ? `<p class="lead">${esc(axis)}</p>` : ""}
+      ${model.type.name ? "" : `<p class="state">这份结果里没有可显示的类型。</p>`}
+      ${model.rushed ? `<p class="scl-rush"><strong>作答偏快。</strong>超过一半的题目间隔不到 1.5 秒。下面的分数仍然按作答计算。</p>` : ""}
+      ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
+      ${ecrPlane(model)}
+      ${ecrMetrics(model)}
+      ${model.dimensions.map(ecrDimArticle).join("")}
+      <h2>四个判别分</h2>
+      <p class="sub">类型是分数最高的一项。回避均分记为 A，焦虑均分记为 B。</p>
+      <ol class="scores ecr-types">${model.types.map(ecrTypeArticle).join("")}</ol>
+      ${notes}
+      ${model.type.text ? `<h2>这一型在说什么</h2><p class="story">${esc(model.type.text)}</p>` : ""}
+      <h2>怎么看</h2>
+      <ul class="guidance">
+        <li>先看两个均分离 4 有多远。4 是量表从 1 到 7 的中点，不是诊断界值。</li>
+        <li>再看四个判别分。最高的一项才是类型，不按“超过 4 分就划进高的一边”来切。</li>
+        <li>这是你在恋爱经历里常常有的感觉，不是对某一次吵架的结论，也不能代替两个人具体怎么相处。</li>
+      </ul>
+      <div class="formulas">
+        <p>回避均分 A = 奇数题之和 ÷ 18。焦虑均分 B = 偶数题之和 ÷ 18。</p>
+        <p>安全型 = A×3.2893296 + B×5.4725318 − 11.5307833</p>
+        <p>恐惧型 = A×7.2371075 + B×8.1776448 − 32.3553266</p>
+        <p>专注型 = A×3.9246754 + B×9.7102446 − 28.4573220</p>
+        <p>冷漠型 = A×7.3654621 + B×4.9392039 − 22.2281088</p>
+        <p>四个数里取最高的一项。这是筛查式的自评，不是诊断。</p>
+      </div>
+      ${extra}
+      ${model.notice ? `<p class="sefs-notice">${esc(model.notice)}</p>` : ""}
+      <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    </div>
   `;
 }
 
@@ -2600,60 +2709,103 @@ function readRoot(report) {
   };
 }
 
-function rootModuleArticle(slot) {
+function rootModuleArticle(slot, index) {
   return `
-    <article class="root-module">
+    <article class="life-module module-${index}">
       <h3>${esc(slot.name)}</h3>
-      <p class="sefs-score">${esc(showScore(slot.score))}</p>
-      <div class="sefs-track" aria-hidden="true"><div class="sefs-fill root-fill" style="width:${rootBar(slot).toFixed(1)}%"></div></div>
-      <p class="sefs-dim-meta"><span>${esc(slot.status || "—")}</span></p>
-      ${slot.about ? `<p class="scl-narrative">${esc(slot.about)}</p>` : ""}
+      <div class="score-orbit"><p class="sefs-score">${esc(showScore(slot.score))}</p></div>
+      <p>${esc(slot.status || "—")}</p>
     </article>
   `;
 }
 
 function rootDimArticle(slot) {
   return `
-    <article class="sefs-dim">
-      <div class="sefs-dim-head">
-        <h3>${esc(slot.name)}</h3>
-        <p class="sefs-score">${esc(showScore(slot.score))} <small>${esc(slot.status || "—")}</small></p>
-      </div>
-      <div class="sefs-track" aria-hidden="true"><div class="sefs-fill root-fill" style="width:${rootBar(slot).toFixed(1)}%"></div></div>
-      <p class="sefs-dim-meta"><span>${esc(slot.module)}</span></p>
-      ${slot.about ? `<p class="scl-narrative">${esc(slot.about)}</p>` : ""}
+    <article>
+      <div><h3>${esc(slot.name)}</h3><span>${esc(slot.about || slot.module || "")}</span></div>
+      <p class="sefs-score">${esc(showScore(slot.score))} <small>${esc(slot.status || "—")}</small></p>
     </article>
   `;
 }
 
+function rootRadar(dimensions) {
+  if (dimensions.some((slot) => slot.score == null)) return "";
+  const center = 145;
+  const radius = 91;
+  const point = (index, value) => {
+    const angle = -Math.PI / 2 + index * Math.PI / 4;
+    return [center + Math.cos(angle) * radius * value, center + Math.sin(angle) * radius * value];
+  };
+  const polygon = (value) => dimensions.map((_, index) => point(index, value).map((n) => n.toFixed(1)).join(",")).join(" ");
+  const values = dimensions.map((slot, index) => point(index, slot.score / 100).map((n) => n.toFixed(1)).join(",")).join(" ");
+  const rings = [0.25, 0.5, 0.75, 1].map((value) => `<polygon points="${polygon(value)}" class="radar-grid"></polygon>`).join("");
+  const axes = dimensions.map((_, index) => {
+    const [x, y] = point(index, 1);
+    return `<line x1="${center}" y1="${center}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="radar-axis"></line>`;
+  }).join("");
+  const dots = dimensions.map((slot, index) => {
+    const [x, y] = point(index, slot.score / 100);
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.8" class="radar-point"></circle>`;
+  }).join("");
+  const labels = dimensions.map((slot, index) => {
+    const [x, y] = point(index, 1.27);
+    return `<span style="left:${(x / 2.9).toFixed(2)}%;top:${(y / 2.9).toFixed(2)}%">${esc(slot.name)}<b>${esc(showScore(slot.score))}</b></span>`;
+  }).join("");
+  return `<div class="radar radar-eight"><svg viewBox="0 0 290 290" role="img" aria-label="八维核心能力雷达图">${rings}${axes}<polygon points="${values}" class="radar-shape"></polygon>${dots}</svg>${labels}</div>`;
+}
+
 function rootClimateArticle(slot) {
-  return `<li><span>${esc(slot.name)}</span><b>${esc(slot.label || "—")}</b></li>`;
+  return `<div><span>${esc(slot.name)}</span><b>${esc(slot.label || "—")}</b></div>`;
+}
+
+function rootGrowth(model) {
+  if (model.dimensions.some((slot) => slot.score == null)) return "";
+  const sorted = model.dimensions.slice().sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, "zh"));
+  const highest = sorted.slice(0, 2);
+  const lowest = sorted[sorted.length - 1];
+  const gap = sorted[0].score - lowest.score;
+  const edges = gap < 8 ? [] : sorted.slice().reverse().slice(0, 2);
+  const advantage = `<section class="growth-diagnosis"><h2>我的成长优势</h2>${highest.map((item) => `<article><b>${esc(item.name)}</b><p>${esc(item.about)}</p><small>从本次作答看，这是你目前相对更稳定的部分。</small></article>`).join("")}</section>`;
+  const weak = edges.length
+    ? `<section class="growth-diagnosis"><h2>我的当前薄弱区</h2>${edges.map((item) => `<article><b>${esc(item.name)}</b><p>${esc(item.about)}</p><small>${esc(item.status)}，适合从真实困惑里继续观察。</small></article>`).join("")}</section>`
+    : `<section class="growth-diagnosis"><h2>目前相对更稳定的部分</h2><p>你的八个维度目前比较接近，暂时没有特别突出的单一短板。接下来更值得结合真实困惑继续判断。</p></section>`;
+  const themes = edges.length
+    ? edges.map((item) => item.name)
+    : ["结合真实困惑继续探索"];
+  const next = `<section class="growth-diagnosis growth-themes"><h2>我的下一阶段成长课题</h2>${themes.map((name) => `<article><b>${esc(name)}</b></article>`).join("")}</section>`;
+  return advantage + weak + next;
 }
 
 export function renderRootReport(report) {
   const model = readRoot(report);
-  const who = model.headline ? `<p class="scl-who">${esc(model.scaleName)}</p>` : "";
+  const title = model.headline || "我的生命成长地图";
   const findings = model.findings.length
-    ? `<h2 class="sefs-section">关键发现</h2><section class="sefs-insight">${model.findings.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    ? `<section class="life-findings"><h2>关键发现</h2>${model.findings.map((line, index) => `<article><b>${String(index + 1).padStart(2, "0")}</b><p>${esc(line)}</p></article>`).join("")}</section>`
     : "";
   const climates = model.climates
-    ? `<h2 class="sefs-section">家庭氛围</h2><p class="scl-sub">这些是你对成长环境的主观体验，不代表对任何家庭成员的评价。</p><ul class="root-climate">${model.climates.map(rootClimateArticle).join("")}</ul>`
+    ? `<section class="family-climate"><h2>家庭氛围关键词</h2><p>这些是你对成长环境的主观体验，不代表对任何家庭成员的评价或诊断。</p>${model.climates.map(rootClimateArticle).join("")}</section>`
     : "";
+  const radar = rootRadar(model.dimensions);
   return `
-    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
-    ${who}
-    <h2 class="sefs-name">${esc(model.headline || model.scaleName)}</h2>
-    <p class="sefs-kicker">${esc(ROOT_NOTICE)}</p>
-    ${model.rushed ? `<p class="scl-rush"><strong>作答偏快。</strong>下面的分数仍然按交卷时的结果展示。</p>` : ""}
-    ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
-    <h2 class="sefs-section">四大生命能力</h2>
-    <section class="root-modules">${model.modules.map(rootModuleArticle).join("")}</section>
-    <h2 class="sefs-section">八项生命能力</h2>
-    <section class="sefs-dims">${model.dimensions.map(rootDimArticle).join("")}</section>
-    ${findings}
-    ${climates}
-    <p class="sefs-notice">${esc(model.notice)}</p>
-    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    <section class="life-map root-map">
+      <div class="life-map-head">
+        <div>
+          <span>觉塑 · 成长诊断</span>
+          <h1 class="sefs-name">${esc(title)}</h1>
+          <p>你已有一些可依靠的成长资源；下一步更值得把注意力放在现实选择与关系中的具体反应上。分数用于观察相对状态，不代表医学或人格诊断。</p>
+          <p class="sub">${esc(model.scaleName)}。${esc(ROOT_NOTICE)}</p>
+        </div>
+      </div>
+      ${model.rushed ? `<p class="scl-rush"><strong>作答偏快。</strong>下面的分数仍然按交卷时的结果展示。</p>` : ""}
+      ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
+      <section class="life-summary"><h2>我的四大生命能力</h2><div class="life-module-grid">${model.modules.map(rootModuleArticle).join("")}</div></section>
+      ${radar ? `<section class="life-radar-card"><h2>8维核心能力雷达图</h2>${radar}</section>` : ""}
+      <section class="dimension-list"><h2>八项生命能力</h2>${model.dimensions.map(rootDimArticle).join("")}</section>
+      ${findings}
+      ${climates}
+      ${rootGrowth(model)}
+      <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    </section>
   `;
 }
 
@@ -2697,37 +2849,6 @@ const JUYING_ALIAS = {
   total: "total", score: "total", sum: "total", 总分: "total",
   mind: "mind", psychology: "mind", 心理特征: "mind", 心理: "mind",
   act: "act", action: "act", behavior: "act", behaviour: "act", 行为特征: "act", 行为: "act",
-};
-
-// 霍兰德兴趣探索：不按 60 题重算。字母是 R I A S E C。
-// holland_code 可在 result.code、viewModel.holland_code 或 extensionData.score.holland_code。
-// structure / bands / ranking 优先 viewModel，再退到 extensionData.score。
-const HOLLAND_NOTICE = "这是兴趣探索，不是职业诊断，也不说明哪种类型更好。";
-const HOLLAND_SCALE = "霍兰德兴趣探索";
-const HOLLAND_DIMS = [
-  { id: "R", name: "实际", line: "喜欢动手，把想法变成看得见的东西。" },
-  { id: "I", name: "研究", line: "喜欢追问为什么，把事情弄明白。" },
-  { id: "A", name: "艺术", line: "喜欢创造、表达和想象。" },
-  { id: "S", name: "社会", line: "喜欢跟人连接，陪人成长。" },
-  { id: "E", name: "企业", line: "喜欢推动事情发生，影响结果。" },
-  { id: "C", name: "常规", line: "喜欢把混乱整理成清楚、有序的样子。" },
-];
-const HOLLAND_ALIAS = {
-  r: "R", realistic: "R", 实际: "R", 实际型: "R",
-  i: "I", investigative: "I", 研究: "I", 研究型: "I",
-  a: "A", artistic: "A", 艺术: "A", 艺术型: "A",
-  s: "S", social: "S", 社会: "S", 社会型: "S",
-  e: "E", enterprising: "E", 企业: "E", 企业型: "E",
-  c: "C", conventional: "C", 常规: "C", 常规型: "C",
-};
-const HOLLAND_DOM = { DUAL: "双核心", SOME: "有主次", PROMINENT: "第一兴趣突出" };
-const HOLLAND_DIF = { LOW: "比较均衡", MID: "有一定区分", HIGH: "区分清楚" };
-const HOLLAND_CON = { HIGH: "相邻", MEDIUM: "隔一位", CROSS: "跨界" };
-const HOLLAND_BREADTH = { ONE: "比较集中", FEW: "有几个中心", MANY: "比较宽" };
-const HOLLAND_QUALITY = {
-  FAST_RESPONSE: "你这次完成得比较快。如果结果和自己的感觉差得远，可以以后在更放松的时候再看一次。",
-  LOW_VARIANCE: "这次不同兴趣之间暂时没有形成明显区分。",
-  MANY_UNSURE: "很多事情你可能还没有充分体验。当前结果可以看成一张暂时的兴趣地图。",
 };
 
 function finiteNum(value) {
@@ -2837,40 +2958,47 @@ function readLoves5(report) {
   };
 }
 
-function loveArticle(slot) {
-  const meaning = slot.narrative || slot.meaning;
-  return `
-    <article class="sefs-dim">
-      <div class="sefs-dim-head">
-        <h3>${esc(slot.name)}</h3>
-        <p class="sefs-score">${esc(showScore(slot.score))} <small>/ ${esc(showScore(slot.max))}</small></p>
+function loveRows(model) {
+  return model.languages.map((slot) => `
+    <li>
+      <div class="love-row">
+        <span>${esc(slot.name)}${slot.primary ? "<em>主爱语</em>" : ""}</span>
+        <span class="sefs-score">${esc(showScore(slot.score))} <small>/ ${esc(showScore(slot.max))}</small></span>
       </div>
-      <div class="sefs-track" aria-hidden="true"><div class="sefs-fill love-fill" style="width:${barWidth(slot).toFixed(1)}%"></div></div>
-      <p class="sefs-dim-meta"><span>${esc(slot.english)}</span><span>${slot.primary ? "主爱语" : ""}</span></p>
-      <p class="scl-narrative">${esc(meaning)}</p>
-      <p class="scl-sub">可以这样表达：${esc(slot.how)}</p>
+      <div class="love-track" aria-hidden="true"><div class="love-fill" style="width:${barWidth(slot).toFixed(1)}%"></div></div>
+    </li>
+  `).join("");
+}
+
+function loveArticles(model) {
+  return model.languages.map((slot) => `
+    <article>
+      <h2>${esc(slot.name)} <span>${esc(slot.english)}</span></h2>
+      <p>${esc(slot.narrative || slot.meaning)}</p>
+      <p class="love-how">可以这样表达：${esc(slot.how)}</p>
     </article>
-  `;
+  `).join("");
 }
 
 export function renderLoves5Report(report) {
   const model = readLoves5(report);
-  const who = model.headline ? `<p class="scl-who">${esc(model.scaleName)}</p>` : "";
   const notes = model.notes.length
-    ? `<section class="sefs-insight">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    ? `<section class="love-notes">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
     : "";
+  const tie = model.tied ? `<p class="love-tie">两种语言同分，都算主爱语。</p>` : "";
   return `
-    <p class="read-note">这是同一份结果的阅读页。五种语言的分数和交卷时一样，这里不能改。</p>
-    ${who}
-    <h2 class="sefs-name">${esc(model.headline || model.scaleName)}</h2>
-    <p class="sefs-kicker">${model.tied ? "这几种语言同分，都算主爱语。" : esc(model.headline ? "主爱语" : LOVES_NOTICE)}</p>
-    ${model.summary ? `<p class="scl-lead">${esc(model.summary)}</p>` : ""}
-    ${model.empty ? `<p class="state">这份结果里没有可显示的五种语言分数。</p>` : ""}
-    <h2 class="sefs-section">五种语言</h2>
-    <section class="sefs-dims">${model.languages.map(loveArticle).join("")}</section>
-    ${notes}
-    <p class="sefs-notice">${esc(LOVES_NOTICE)}</p>
-    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    <div class="loves-map">
+      <p class="sub">${esc(model.scaleName)}</p>
+      <h1 class="sefs-name">${esc(model.headline || model.scaleName)}</h1>
+      ${tie}
+      ${model.summary ? `<p class="lead">${esc(model.summary)}</p>` : ""}
+      ${model.empty ? `<p class="state">这份结果里没有可显示的五种语言分数。</p>` : ""}
+      <ul class="love-scores">${loveRows(model)}</ul>
+      <section class="love-detail">${loveArticles(model)}</section>
+      ${notes}
+      <p class="sefs-notice">${esc(LOVES_NOTICE)}</p>
+      <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    </div>
   `;
 }
 
@@ -2902,17 +3030,41 @@ function readJuying(report) {
   }
   const bandObj = asObj(view.band) || asObj(score.band) || {};
   const code = text(result.code) || text(bandObj.id) || text(view.bandId) || text(score.bandId);
-  const band = text(result.label) || text(bandObj.name) || JUYING_BANDS[code] || "";
+  const bandFromCode = JUYING_BANDS[code] || "";
+  const band = text(result.label) || text(bandObj.name) || bandFromCode || "";
+  const bandId = JUYING_BAND_COPY.some((item) => item.id === code)
+    ? code
+    : (JUYING_BAND_COPY.find((item) => item.name === band)?.id || "");
+  const markedList = Array.isArray(view.marked) ? view.marked : Array.isArray(score.marked) ? score.marked : null;
   const marked = [];
-  const markedList = Array.isArray(view.marked) ? view.marked : Array.isArray(score.marked) ? score.marked : [];
-  for (const item of markedList) {
+  for (const item of markedList || []) {
     if (!item || typeof item !== "object") continue;
     const body = text(item.text) || text(item.name);
     if (!body) continue;
-    const bits = [text(item.group) || text(item.groupName), item.n != null ? `${item.n}.` : "", body, text(item.label)];
-    const value = finiteNum(item.score);
-    if (value != null) bits.push(`（${showScore(value)}）`);
-    marked.push(bits.filter(Boolean).join(" "));
+    marked.push({
+      group: text(item.group) || text(item.groupName),
+      n: item.n == null ? "" : String(item.n),
+      text: body,
+      score: finiteNum(item.score),
+      label: text(item.label),
+    });
+  }
+  const rowLists = [view.rows, score.rows, view.items, score.items].filter(Array.isArray);
+  const itemRows = [];
+  for (const list of rowLists) {
+    list.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const body = text(item.text) || text(item.name);
+      if (!body) return;
+      itemRows.push({
+        group: text(item.group) || text(item.groupName) || text(item.groupId),
+        n: item.n == null ? "" : String(item.n),
+        text: body,
+        score: finiteNum(item.score),
+        label: text(item.label),
+      });
+    });
+    if (itemRows.length) break;
   }
   const side = text(view.side) || text(score.side) || "";
   const summary = text(result.summary);
@@ -2921,10 +3073,13 @@ function readJuying(report) {
     scaleName: text(safe.assessmentName) || JUYING_SCALE,
     headline: text(result.headline) || (band ? `${band}${rows[0].score != null ? ` · ${showScore(rows[0].score)} 分` : ""}` : ""),
     band,
+    bandId,
+    markedKnown: Array.isArray(markedList),
     side: side && side !== summary ? side : "",
     summary: summary && summary !== text(result.headline) ? summary : "",
     rows,
     marked,
+    itemRows,
     empty: rows.every((item) => item.score == null),
     notes: freshLines(proseLines(safe), [text(result.headline), summary, side, JUYING_NOTICE, JUYING_DISCLAIMER]),
     nickname: text(safe.nickname),
@@ -2933,185 +3088,127 @@ function readJuying(report) {
   };
 }
 
-function jyArticle(slot) {
-  return `
-    <article class="sefs-dim">
-      <div class="sefs-dim-head">
-        <h3>${esc(slot.name)}</h3>
-        <p class="sefs-score">${esc(showScore(slot.score))} <small>/ ${esc(showScore(slot.max))}</small></p>
-      </div>
-      <div class="sefs-track" aria-hidden="true"><div class="sefs-fill jy-fill" style="width:${barWidth(slot).toFixed(1)}%"></div></div>
-    </article>
-  `;
+function jyScoreSpan(slot) {
+  return `${esc(showScore(slot.score))} <small>/ ${esc(showScore(slot.max))}</small>`;
+}
+
+function jyMarked(model) {
+  if (model.marked.length) {
+    return `<ul class="high">${model.marked.map((row) => `
+      <li>
+        <strong>${esc([row.group, row.n].filter(Boolean).join(" "))}</strong>
+        <span>${esc(row.text)}</span>
+        ${row.score == null ? "" : `<em>${esc(showScore(row.score))}${row.label ? ` · ${esc(row.label)}` : ""}</em>`}
+      </li>
+    `).join("")}</ul>`;
+  }
+  if (model.markedKnown) {
+    return "<p>没有单项达到 4 分。分数是很多「不太像」「有一点像」「有些像」加出来的，不是集中在某几项上。分档仍然按总分，不按某一项。</p>";
+  }
+  return "";
+}
+
+function jyLedger(model) {
+  if (!model.itemRows.length) return "";
+  const groups = JUYING_GROUPS.map((group) => {
+    const rows = model.itemRows.filter((row) => row.group === group.id || row.group === group.name);
+    if (!rows.length) return "";
+    const known = model.rows.find((item) => item.id === group.id);
+    return `
+      <section class="ledger-group">
+        <h3>${esc(group.name)} <span>${known && known.score != null ? jyScoreSpan(known) : ""}</span></h3>
+        <ol>${rows.map((row) => `
+          <li class="${row.score != null && row.score >= 4 ? "hot" : ""}">
+            <strong>${esc(row.n)}</strong>
+            <span>${esc(row.text)}</span>
+            <em>${row.score == null ? "" : esc(showScore(row.score))}${row.label ? ` · ${esc(row.label)}` : ""}</em>
+          </li>
+        `).join("")}</ol>
+      </section>
+    `;
+  }).join("");
+  if (!groups.trim()) return "";
+  return `<h2>逐项分数</h2><p class="about">0 到 5 都列在这里。4 分和 5 分用深色标出。</p>${groups}`;
 }
 
 export function renderJuyingReport(report) {
   const model = readJuying(report);
   const total = model.rows.find((item) => item.id === "total");
-  const who = model.headline ? `<p class="scl-who">${esc(model.scaleName)}</p>` : "";
-  const marked = model.marked.length
-    ? `<h2 class="sefs-section">很像的项目</h2><ul class="mark-list">${model.marked.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>`
-    : "";
-  const notes = model.notes.length
-    ? `<section class="sefs-insight">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
-    : "";
-  return `
-    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
-    ${who}
-    <h2 class="sefs-name">${esc(model.headline || model.band || model.scaleName)}</h2>
-    <p class="sefs-kicker">${esc(JUYING_NOTICE)}</p>
-    ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : `
-      <p class="sefs-total-num">${esc(showScore(total.score))}<span> / 100</span></p>
-      <p class="sefs-total-label">${esc(model.band || "总分")}</p>
-    `}
-    ${model.summary ? `<p class="scl-lead">${esc(model.summary)}</p>` : ""}
-    ${model.side ? `<p>${esc(model.side)}</p>` : ""}
-    <h2 class="sefs-section">心理特征和行为特征</h2>
-    <p class="scl-sub">前 10 项是心理特征，后 10 项是行为特征，各满分 50。分档名称不是诊断。</p>
-    <section class="sefs-dims">${model.rows.filter((item) => item.id !== "total").map(jyArticle).join("")}</section>
-    ${marked}
-    ${notes}
-    <p class="sefs-notice">${esc(JUYING_NOTICE)}</p>
-    <p class="sefs-notice">${esc(JUYING_DISCLAIMER)}</p>
-    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
-  `;
-}
-
-function hollandSlot(id) {
-  const meta = HOLLAND_DIMS.find((item) => item.id === id);
-  return { ...meta, score: null, max: 100 };
-}
-
-function hollandCodeOf(report, view, score, result) {
-  const candidates = [result.code, view.holland_code, view.hollandCode, score.holland_code, score.hollandCode, view.code];
-  for (const candidate of candidates) {
-    const code = text(candidate).toUpperCase();
-    if (/^[RIASEC]{3}$/.test(code)) return code;
-  }
-  const loose = candidates.map((candidate) => text(candidate)).find(Boolean);
-  return loose || "";
-}
-
-function readHolland(report) {
-  const safe = report || {};
-  const slots = new Map(HOLLAND_DIMS.map((item) => [item.id, hollandSlot(item.id)]));
-  const view = viewModelOf(safe);
-  const score = calcOf(safe);
-  const result = asObj(safe.result) || {};
-  for (const bag of [scoreBag(score), scoreBag(view)]) {
-    if (!bag) continue;
-    for (const key of Object.keys(bag)) {
-      const id = aliasId(HOLLAND_ALIAS, key);
-      const value = finiteNum(bag[key]);
-      if (id && value != null && !["dominance", "differentiation", "breadth"].includes(key)) slots.get(id).score = value;
-    }
-  }
-  const dims = Array.isArray(safe.dimensions) ? safe.dimensions : [];
-  for (const dim of dims) {
-    if (!dim || typeof dim !== "object") continue;
-    const id = aliasId(HOLLAND_ALIAS, dim.id) || aliasId(HOLLAND_ALIAS, dim.name);
-    if (!id) continue;
-    const value = finiteNum(dim.score);
-    if (value != null) slots.get(id).score = value;
-    const max = finiteNum(dim.max);
-    if (max != null && max > 0) slots.get(id).max = max;
-    if (text(dim.narrative)) slots.get(id).line = text(dim.narrative);
-  }
-  const code = hollandCodeOf(safe, view, score, result);
-  const ranking = [];
-  const rankSource = Array.isArray(view.ranking) ? view.ranking : Array.isArray(score.ranking) ? score.ranking : code.split("");
-  for (const item of rankSource) {
-    const id = aliasId(HOLLAND_ALIAS, item);
-    if (id && !ranking.includes(id)) ranking.push(id);
-  }
-  const rest = HOLLAND_DIMS.map((item) => item.id)
-    .filter((id) => !ranking.includes(id))
-    .sort((a, b) => (slots.get(b).score ?? -1) - (slots.get(a).score ?? -1) || a.localeCompare(b));
-  const order = ranking.concat(rest).map((id) => slots.get(id));
-  const structure = asObj(view.structure) || asObj(score.structure) || {};
-  const bands = asObj(view.bands) || asObj(score.bands) || {};
-  const quality = []
-    .concat(Array.isArray(view.quality) ? view.quality : [], Array.isArray(score.quality) ? score.quality : [], Array.isArray(result.flags) ? result.flags : [])
-    .map((item) => HOLLAND_QUALITY[text(item)] || "")
-    .filter(Boolean);
-  const explore = asObj(view.explore) || asObj(safe.extensionData && safe.extensionData.openText) || {};
-  const quote = text(explore.q1);
-  const facts = [];
-  const dominance = HOLLAND_DOM[text(bands.dominance)] || "";
-  const differentiation = HOLLAND_DIF[text(bands.differentiation)] || "";
-  const consistency = HOLLAND_CON[text(structure.consistency)] || "";
-  const breadth = HOLLAND_BREADTH[text(bands.breadth)] || "";
-  if (dominance) facts.push(["主次", dominance]);
-  if (differentiation) facts.push(["区分度", differentiation]);
-  if (consistency) facts.push(["一致性", consistency]);
-  if (breadth) facts.push(["广度", breadth]);
-  const summary = text(result.summary);
-  const headline = text(result.headline);
-  return {
-    scaleName: text(safe.assessmentName) || HOLLAND_SCALE,
-    headline,
-    code,
-    label: text(result.label),
-    summary: summary && summary !== headline ? summary : "",
-    order,
-    facts,
-    quality: [...new Set(quality)],
-    quote,
-    empty: !code && order.every((item) => item.score == null),
-    notes: freshLines(proseLines(safe), [headline, summary, quote, HOLLAND_NOTICE]),
-    nickname: text(safe.nickname),
-    completedAt: safe.completedAt,
-    version: versionText(safe.assessmentVersion),
-  };
-}
-
-function hollandArticle(slot) {
-  return `
-    <article class="sefs-dim">
-      <div class="sefs-dim-head">
-        <h3>${esc(slot.name)} ${esc(slot.id)}</h3>
-        <p class="sefs-score">${esc(showScore(slot.score))}</p>
+  const mind = model.rows.find((item) => item.id === "mind");
+  const act = model.rows.find((item) => item.id === "act");
+  const bandName = model.band || "总分";
+  const title = total && total.score != null
+    ? `${esc(showScore(total.score))}<span> 分 · ${esc(bandName)}</span>`
+    : esc(model.headline || bandName || model.scaleName);
+  const average = total && total.score != null ? (Math.round((total.score / 20) * 100) / 100) : null;
+  const zones = [40, 19, 21, 20];
+  const ruler = total && total.score != null ? `
+    <div class="ruler" role="img" aria-label="总分 ${esc(showScore(total.score))}，${esc(bandName)}">
+      <div class="track">
+        ${JUYING_BAND_COPY.map((band, index) => `<span class="zone ${band.id === model.bandId ? "on" : ""}" style="flex:${zones[index]}"></span>`).join("")}
+        <i class="needle" style="--p:${Math.max(0, Math.min(100, total.score))}"></i>
       </div>
-      <div class="sefs-track" aria-hidden="true"><div class="sefs-fill holland-fill" style="width:${barWidth(slot).toFixed(1)}%"></div></div>
-      <p class="scl-narrative">${esc(slot.line)}</p>
-    </article>
+      <div class="ticks" aria-hidden="true">
+        <span style="left:0">0</span>
+        <span style="left:40%">40</span>
+        <span style="left:59%">59</span>
+        <span style="left:80%">80</span>
+        <span class="end">100</span>
+      </div>
+    </div>
+  ` : "";
+  const cuts = JUYING_BAND_COPY.map((band) => `
+    <div class="${band.id === model.bandId ? "on" : ""}">
+      <dt>${esc(band.range)}</dt>
+      <dd>${esc(band.name)}${band.id === model.bandId ? " · 你在这里" : ""}</dd>
+    </div>
+  `).join("");
+  const jumps = JUYING_BAND_COPY.map((band) => `<a href="#band-${band.id}" class="${band.id === model.bandId ? "on" : ""}">${esc(band.name)}</a>`).join("");
+  const bands = JUYING_BAND_COPY.map((band) => {
+    const yours = band.id === model.bandId;
+    return `
+      <section class="band${yours ? " on" : ""}" id="band-${band.id}">
+        ${yours && total && total.score != null ? `<p class="you">你在这一档 · 总分 ${esc(showScore(total.score))}</p>` : ""}
+        <h3>${esc(band.name)}</h3>
+        <p class="range">${esc(band.range)} · ${esc(band.source)}</p>
+        ${band.paragraphs.map((paragraph) => `<p>${esc(paragraph)}</p>`).join("")}
+      </section>
+    `;
+  }).join("");
+  const notes = model.notes.length
+    ? `<section class="jy-notes">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    : "";
+  const spread = !model.empty
+    ? `<p>心理特征 ${esc(showScore(mind.score))} 分，满分 50。行为特征 ${esc(showScore(act.score))} 分，满分 50。${model.side ? esc(model.side) : ""}</p>
+       <p class="sub">心理特征 ${jyScoreSpan(mind)}。行为特征 ${jyScoreSpan(act)}。分档名称不是诊断。</p>`
+    : "";
+  return `
+    <div class="jy-map">
+      <p class="sub">${esc(model.scaleName)}</p>
+      <h1>${title}</h1>
+      ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : ""}
+      ${average == null ? "" : `<p class="lead">20 项平均 ${esc(String(average))} 分。0 是一点也不像，2 是有一点像，3 是有些像，4 是很像，5 是与我一样。</p>`}
+      ${ruler}
+      <p class="fine">${esc(JUYING_DISCLAIMER)}</p>
+      ${spread ? `<h2>你的答卷怎么分布</h2>${spread}` : ""}
+      ${model.summary ? `<p class="lead">${esc(model.summary)}</p>` : ""}
+      ${model.marked.length || model.markedKnown ? `<h2>打到 4 分和 5 分的项</h2><p>4 分是很像，5 分是与我一样。读分档时对着这几条看，它们比总分更具体。</p>${jyMarked(model)}` : ""}
+      <h2 id="ref">分值参考</h2>
+      ${JUYING_REFERENCE_INTRO.map((paragraph) => `<p>${esc(paragraph)}</p>`).join("")}
+      <dl class="cuts">${cuts}</dl>
+      <p class="jumps">写开在下面：${jumps}</p>
+      ${bands}
+      ${jyLedger(model)}
+      ${notes}
+      <p class="sefs-notice">${esc(JUYING_NOTICE)}</p>
+      <p class="fine">${esc(JUYING_DISCLAIMER)} 不是诊断。分数只和这 20 项有关，不和其他测评相加。</p>
+      <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+    </div>
   `;
 }
 
 export function renderHollandReport(report) {
-  const model = readHolland(report);
-  const code = /^[RIASEC]{3}$/.test(model.code)
-    ? `<p class="holland-code">${model.code.split("").map((letter) => `<span>${letter}</span>`).join("")}</p>`
-    : (model.code ? `<p class="holland-code">${esc(model.code)}</p>` : "");
-  const who = `<p class="scl-who">${esc(model.scaleName)}</p>`;
-  const facts = model.facts.length
-    ? `<h2 class="sefs-section">兴趣结构</h2><ul class="pair-list">${model.facts.map(([name, value]) => `<li><span>${esc(name)}</span><b>${esc(value)}</b></li>`).join("")}</ul>`
-    : "";
-  const quality = model.quality.length
-    ? `<section class="sefs-insight">${model.quality.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
-    : "";
-  const quote = model.quote ? `<h2 class="sefs-section">你写下的投入</h2><p>${esc(model.quote)}</p>` : "";
-  const notes = model.notes.length
-    ? `<section class="sefs-insight">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
-    : "";
-  return `
-    <p class="read-note">这是同一份结果的阅读页。兴趣分数和交卷时一样，这里不能改。</p>
-    ${who}
-    <h2 class="sefs-name">${esc(model.headline || "核心兴趣组合")}</h2>
-    ${code}
-    ${model.label ? `<p class="scl-lead">${esc(model.label)}</p>` : ""}
-    <p class="sefs-kicker">${esc(HOLLAND_NOTICE)}</p>
-    ${model.summary ? `<p>${esc(model.summary)}</p>` : ""}
-    ${model.empty ? `<p class="state">这份结果里没有可显示的兴趣分数。</p>` : ""}
-    ${quality}
-    <h2 class="sefs-section">六个兴趣</h2>
-    <section class="sefs-dims">${model.order.map(hollandArticle).join("")}</section>
-    ${facts}
-    ${quote}
-    ${notes}
-    <p class="sefs-notice">${esc(HOLLAND_NOTICE)}</p>
-    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
-  `;
+  return renderHollandMap(report);
 }
 
 export function renderReport(report) {
