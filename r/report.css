@@ -282,8 +282,35 @@ ol, ul { margin: 8px 0 0; padding-left: 1.2em; }
 .root-climate span { min-width: 0; font-family: var(--serif); font-size: 18px; }
 .root-climate b { flex: none; font-size: 16px; font-weight: 500; }
 
+.love-fill { background: #8d2f2a; }
+.jy-fill { background: #243e5c; }
+.holland-fill { background: #1f2d5c; }
+.holland-code {
+  margin: 8px 0 0;
+  font-family: var(--serif);
+  font-size: clamp(40px, 12vw, 64px);
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+.holland-code span { display: inline-block; min-width: 0.85em; }
+.pair-list, .mark-list { margin: 8px 0 0; }
+.pair-list { list-style: none; padding: 0; }
+.pair-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid #e6ddd4;
+}
+.pair-list span { font-family: var(--serif); font-size: 18px; }
+.pair-list b { flex: none; font-weight: 500; }
+.mark-list { padding-left: 1.2em; }
+.mark-list li { margin: 10px 0 0; }
+
 @media (max-width: 640px) {
   .sheet { padding: 24px 16px; }
   .roster { grid-template-columns: 1fr; }
   .root-modules { grid-template-columns: 1fr; }
+  .holland-code { letter-spacing: 0.04em; }
 }

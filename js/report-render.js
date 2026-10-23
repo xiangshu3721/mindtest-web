@@ -2657,6 +2657,463 @@ export function renderRootReport(report) {
   `;
 }
 
+// 爱的 5 种语言：不按 30 道选择重算。assessmentId 必须是 loves5。
+// 分数优先 dimensions，其次 viewModel.scores / extensionData.score.scores。
+// id 可以是 A–E，也可以是 words / time / gifts / service / touch 或中文名。
+// 主爱语看 result.code、viewModel.primaries，或 level / levelLabel。没有分数就留「—」。
+const LOVES_NOTICE = "这是一份爱的语言整理，不是性格诊断，也不说明哪种语言更好。";
+const LOVES_SCALE = "爱的 5 种语言";
+const LOVES = [
+  { id: "A", name: "肯定的言词", english: "Words of Affirmation", meaning: "赞美、鼓励、感激。口头和书面的肯定，是被看见的证据。", how: "认真称赞，说「我爱你」，写短笺，肯定对方的选择。" },
+  { id: "B", name: "精心的时刻", english: "Quality Time", meaning: "全神贯注的陪伴。一起做事，或只是在一起，不被打断。", how: "放下手机，一起散步，把一段对话听完。" },
+  { id: "C", name: "接受礼物", english: "Receiving Gifts", meaning: "礼物是看见与惦记的可见记号。贵重与否不重要，有心才重要。", how: "记得日子，带一个小物件回来，亲手做也算。" },
+  { id: "D", name: "服务的行动", english: "Acts of Service", meaning: "愿意做对方希望被帮忙的事，把负担从对方肩上挪开。", how: "做饭、洗碗、代办琐事，不用等对方开口。" },
+  { id: "E", name: "身体的接触", english: "Physical Touch", meaning: "靠近、触碰、被抱住。身体在场，才会觉得安全。", how: "牵手、拥抱、坐近一点，允许亲昵。" },
+];
+const LOVE_ALIAS = {
+  a: "A", words: "A", wordsofaffirmation: "A", affirmation: "A", 肯定的言词: "A", 肯定言词: "A",
+  b: "B", time: "B", qualitytime: "B", 精心的时刻: "B", 精心时刻: "B",
+  c: "C", gifts: "C", gift: "C", receivinggifts: "C", 接受礼物: "C", 礼物: "C",
+  d: "D", service: "D", actsofservice: "D", 服务的行动: "D", 服务行动: "D",
+  e: "E", touch: "E", physicaltouch: "E", 身体的接触: "E", 身体接触: "E",
+};
+
+// 巨婴测评：不按 20 项重算。id 是 total / mind / act。分档 id 是 mature、partial、infant、child。
+const JUYING_NOTICE = "这是讲座对照，不是诊断，也不是心理评估。";
+const JUYING_DISCLAIMER = "非严肃科学，仅供讲座听众理解学习。";
+const JUYING_SCALE = "巨婴测评";
+const JUYING_BANDS = {
+  mature: "心智成熟",
+  partial: "有部分巨婴特质",
+  infant: "巨婴",
+  child: "儿童状态",
+};
+const JUYING_ORDER = [
+  { id: "total", name: "总分", max: 100 },
+  { id: "mind", name: "心理特征", max: 50 },
+  { id: "act", name: "行为特征", max: 50 },
+];
+const JUYING_ALIAS = {
+  total: "total", score: "total", sum: "total", 总分: "total",
+  mind: "mind", psychology: "mind", 心理特征: "mind", 心理: "mind",
+  act: "act", action: "act", behavior: "act", behaviour: "act", 行为特征: "act", 行为: "act",
+};
+
+// 霍兰德兴趣探索：不按 60 题重算。字母是 R I A S E C。
+// holland_code 可在 result.code、viewModel.holland_code 或 extensionData.score.holland_code。
+// structure / bands / ranking 优先 viewModel，再退到 extensionData.score。
+const HOLLAND_NOTICE = "这是兴趣探索，不是职业诊断，也不说明哪种类型更好。";
+const HOLLAND_SCALE = "霍兰德兴趣探索";
+const HOLLAND_DIMS = [
+  { id: "R", name: "实际", line: "喜欢动手，把想法变成看得见的东西。" },
+  { id: "I", name: "研究", line: "喜欢追问为什么，把事情弄明白。" },
+  { id: "A", name: "艺术", line: "喜欢创造、表达和想象。" },
+  { id: "S", name: "社会", line: "喜欢跟人连接，陪人成长。" },
+  { id: "E", name: "企业", line: "喜欢推动事情发生，影响结果。" },
+  { id: "C", name: "常规", line: "喜欢把混乱整理成清楚、有序的样子。" },
+];
+const HOLLAND_ALIAS = {
+  r: "R", realistic: "R", 实际: "R", 实际型: "R",
+  i: "I", investigative: "I", 研究: "I", 研究型: "I",
+  a: "A", artistic: "A", 艺术: "A", 艺术型: "A",
+  s: "S", social: "S", 社会: "S", 社会型: "S",
+  e: "E", enterprising: "E", 企业: "E", 企业型: "E",
+  c: "C", conventional: "C", 常规: "C", 常规型: "C",
+};
+const HOLLAND_DOM = { DUAL: "双核心", SOME: "有主次", PROMINENT: "第一兴趣突出" };
+const HOLLAND_DIF = { LOW: "比较均衡", MID: "有一定区分", HIGH: "区分清楚" };
+const HOLLAND_CON = { HIGH: "相邻", MEDIUM: "隔一位", CROSS: "跨界" };
+const HOLLAND_BREADTH = { ONE: "比较集中", FEW: "有几个中心", MANY: "比较宽" };
+const HOLLAND_QUALITY = {
+  FAST_RESPONSE: "你这次完成得比较快。如果结果和自己的感觉差得远，可以以后在更放松的时候再看一次。",
+  LOW_VARIANCE: "这次不同兴趣之间暂时没有形成明显区分。",
+  MANY_UNSURE: "很多事情你可能还没有充分体验。当前结果可以看成一张暂时的兴趣地图。",
+};
+
+function finiteNum(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return null;
+}
+
+function aliasId(table, value) {
+  const raw = text(value).replace(/\s+/g, "");
+  if (!raw) return "";
+  return table[raw] || table[raw.toLowerCase()] || "";
+}
+
+function scoreBag(value) {
+  const obj = asObj(value);
+  if (!obj) return null;
+  return asObj(obj.scores) || obj;
+}
+
+function freshLines(lines, seen) {
+  const bag = new Set(seen.filter(Boolean));
+  const out = [];
+  for (const line of lines) {
+    const body = text(line);
+    if (!body || bag.has(body)) continue;
+    bag.add(body);
+    out.push(body);
+  }
+  return out;
+}
+
+function proseLines(report) {
+  return blocksOf(report && report.interpretation)
+    .concat(blocksOf(report && report.recommendations))
+    .map((block) => (block.title && block.title !== block.text ? `${block.title}：${block.text}` : block.text));
+}
+
+function loveSlot(id) {
+  const meta = LOVES.find((item) => item.id === id);
+  return { ...meta, score: null, max: 12, primary: false, narrative: "" };
+}
+
+function readLoves5(report) {
+  const safe = report || {};
+  const slots = new Map(LOVES.map((item) => [item.id, loveSlot(item.id)]));
+  const view = viewModelOf(safe);
+  const score = calcOf(safe);
+  const result = asObj(safe.result) || {};
+  for (const bag of [scoreBag(score), scoreBag(view), scoreBag(view.score)]) {
+    if (!bag) continue;
+    for (const key of Object.keys(bag)) {
+      const id = aliasId(LOVE_ALIAS, key);
+      const value = finiteNum(bag[key]);
+      if (id && value != null) slots.get(id).score = value;
+    }
+  }
+  const dims = Array.isArray(safe.dimensions) ? safe.dimensions : [];
+  for (const dim of dims) {
+    if (!dim || typeof dim !== "object") continue;
+    const id = aliasId(LOVE_ALIAS, dim.id) || aliasId(LOVE_ALIAS, dim.name);
+    if (!id) continue;
+    const slot = slots.get(id);
+    const value = finiteNum(dim.score);
+    if (value != null) slot.score = value;
+    const max = finiteNum(dim.max);
+    if (max != null && max > 0) slot.max = max;
+    if (text(dim.narrative)) slot.narrative = text(dim.narrative);
+    const level = text(dim.level).toLowerCase();
+    const label = text(dim.levelLabel);
+    if (level === "primary" || label.includes("主爱语")) slot.primary = true;
+  }
+  const code = text(result.code).toUpperCase().replace(/[^A-E]/g, "");
+  const listed = Array.isArray(view.primaries) ? view.primaries : Array.isArray(score.primaries) ? score.primaries : [];
+  for (const item of listed) {
+    const id = aliasId(LOVE_ALIAS, item);
+    if (id) slots.get(id).primary = true;
+  }
+  if (code) {
+    for (const id of slots.keys()) slots.get(id).primary = code.includes(id);
+  }
+  const rankedRaw = Array.isArray(view.ranked) ? view.ranked : Array.isArray(score.ranked) ? score.ranked : [];
+  const ranked = [];
+  for (const item of rankedRaw) {
+    const id = aliasId(LOVE_ALIAS, item);
+    if (id && !ranked.includes(id)) ranked.push(id);
+  }
+  const rest = LOVES.map((item) => item.id)
+    .filter((id) => !ranked.includes(id))
+    .sort((a, b) => (slots.get(b).score ?? -1) - (slots.get(a).score ?? -1) || a.localeCompare(b));
+  const order = ranked.concat(rest);
+  const languages = order.map((id) => slots.get(id));
+  const primaries = languages.filter((item) => item.primary);
+  const headline = text(result.headline) || (primaries.length ? primaries.map((item) => item.name).join(" 与 ") : "");
+  const summary = text(result.summary);
+  return {
+    scaleName: text(safe.assessmentName) || LOVES_SCALE,
+    headline,
+    summary: summary && summary !== headline ? summary : "",
+    languages,
+    tied: primaries.length > 1 || (Array.isArray(result.flags) && result.flags.includes("tied")),
+    empty: languages.every((item) => item.score == null),
+    notes: freshLines(proseLines(safe), [headline, summary, LOVES_NOTICE]),
+    nickname: text(safe.nickname),
+    completedAt: safe.completedAt,
+    version: versionText(safe.assessmentVersion),
+  };
+}
+
+function loveArticle(slot) {
+  const meaning = slot.narrative || slot.meaning;
+  return `
+    <article class="sefs-dim">
+      <div class="sefs-dim-head">
+        <h3>${esc(slot.name)}</h3>
+        <p class="sefs-score">${esc(showScore(slot.score))} <small>/ ${esc(showScore(slot.max))}</small></p>
+      </div>
+      <div class="sefs-track" aria-hidden="true"><div class="sefs-fill love-fill" style="width:${barWidth(slot).toFixed(1)}%"></div></div>
+      <p class="sefs-dim-meta"><span>${esc(slot.english)}</span><span>${slot.primary ? "主爱语" : ""}</span></p>
+      <p class="scl-narrative">${esc(meaning)}</p>
+      <p class="scl-sub">可以这样表达：${esc(slot.how)}</p>
+    </article>
+  `;
+}
+
+export function renderLoves5Report(report) {
+  const model = readLoves5(report);
+  const who = model.headline ? `<p class="scl-who">${esc(model.scaleName)}</p>` : "";
+  const notes = model.notes.length
+    ? `<section class="sefs-insight">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    : "";
+  return `
+    <p class="read-note">这是同一份结果的阅读页。五种语言的分数和交卷时一样，这里不能改。</p>
+    ${who}
+    <h2 class="sefs-name">${esc(model.headline || model.scaleName)}</h2>
+    <p class="sefs-kicker">${model.tied ? "这几种语言同分，都算主爱语。" : esc(model.headline ? "主爱语" : LOVES_NOTICE)}</p>
+    ${model.summary ? `<p class="scl-lead">${esc(model.summary)}</p>` : ""}
+    ${model.empty ? `<p class="state">这份结果里没有可显示的五种语言分数。</p>` : ""}
+    <h2 class="sefs-section">五种语言</h2>
+    <section class="sefs-dims">${model.languages.map(loveArticle).join("")}</section>
+    ${notes}
+    <p class="sefs-notice">${esc(LOVES_NOTICE)}</p>
+    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+  `;
+}
+
+function jyId(value) {
+  return aliasId(JUYING_ALIAS, value);
+}
+
+function readJuying(report) {
+  const safe = report || {};
+  const slots = new Map(JUYING_ORDER.map((item) => [item.id, { ...item, score: null }]));
+  const view = viewModelOf(safe);
+  const score = calcOf(safe);
+  const result = asObj(safe.result) || {};
+  for (const bag of [score, view]) {
+    for (const item of JUYING_ORDER) {
+      const value = finiteNum(bag[item.id]);
+      if (value != null) slots.get(item.id).score = value;
+    }
+  }
+  const dims = Array.isArray(safe.dimensions) ? safe.dimensions : [];
+  for (const dim of dims) {
+    if (!dim || typeof dim !== "object") continue;
+    const id = jyId(dim.id) || jyId(dim.name);
+    if (!id) continue;
+    const value = finiteNum(dim.score);
+    if (value != null) slots.get(id).score = value;
+    const max = finiteNum(dim.max);
+    if (max != null && max > 0) slots.get(id).max = max;
+  }
+  const bandObj = asObj(view.band) || asObj(score.band) || {};
+  const code = text(result.code) || text(bandObj.id) || text(view.bandId) || text(score.bandId);
+  const band = text(result.label) || text(bandObj.name) || JUYING_BANDS[code] || "";
+  const marked = [];
+  const markedList = Array.isArray(view.marked) ? view.marked : Array.isArray(score.marked) ? score.marked : [];
+  for (const item of markedList) {
+    if (!item || typeof item !== "object") continue;
+    const body = text(item.text) || text(item.name);
+    if (!body) continue;
+    const bits = [text(item.group) || text(item.groupName), item.n != null ? `${item.n}.` : "", body, text(item.label)];
+    const value = finiteNum(item.score);
+    if (value != null) bits.push(`（${showScore(value)}）`);
+    marked.push(bits.filter(Boolean).join(" "));
+  }
+  const side = text(view.side) || text(score.side) || "";
+  const summary = text(result.summary);
+  const rows = JUYING_ORDER.map((item) => slots.get(item.id));
+  return {
+    scaleName: text(safe.assessmentName) || JUYING_SCALE,
+    headline: text(result.headline) || (band ? `${band}${rows[0].score != null ? ` · ${showScore(rows[0].score)} 分` : ""}` : ""),
+    band,
+    side: side && side !== summary ? side : "",
+    summary: summary && summary !== text(result.headline) ? summary : "",
+    rows,
+    marked,
+    empty: rows.every((item) => item.score == null),
+    notes: freshLines(proseLines(safe), [text(result.headline), summary, side, JUYING_NOTICE, JUYING_DISCLAIMER]),
+    nickname: text(safe.nickname),
+    completedAt: safe.completedAt,
+    version: versionText(safe.assessmentVersion),
+  };
+}
+
+function jyArticle(slot) {
+  return `
+    <article class="sefs-dim">
+      <div class="sefs-dim-head">
+        <h3>${esc(slot.name)}</h3>
+        <p class="sefs-score">${esc(showScore(slot.score))} <small>/ ${esc(showScore(slot.max))}</small></p>
+      </div>
+      <div class="sefs-track" aria-hidden="true"><div class="sefs-fill jy-fill" style="width:${barWidth(slot).toFixed(1)}%"></div></div>
+    </article>
+  `;
+}
+
+export function renderJuyingReport(report) {
+  const model = readJuying(report);
+  const total = model.rows.find((item) => item.id === "total");
+  const who = model.headline ? `<p class="scl-who">${esc(model.scaleName)}</p>` : "";
+  const marked = model.marked.length
+    ? `<h2 class="sefs-section">很像的项目</h2><ul class="mark-list">${model.marked.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>`
+    : "";
+  const notes = model.notes.length
+    ? `<section class="sefs-insight">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    : "";
+  return `
+    <p class="read-note">这是同一份结果的阅读页。分数和交卷时一样，这里不能改。</p>
+    ${who}
+    <h2 class="sefs-name">${esc(model.headline || model.band || model.scaleName)}</h2>
+    <p class="sefs-kicker">${esc(JUYING_NOTICE)}</p>
+    ${model.empty ? `<p class="state">这份结果里没有可显示的分数。</p>` : `
+      <p class="sefs-total-num">${esc(showScore(total.score))}<span> / 100</span></p>
+      <p class="sefs-total-label">${esc(model.band || "总分")}</p>
+    `}
+    ${model.summary ? `<p class="scl-lead">${esc(model.summary)}</p>` : ""}
+    ${model.side ? `<p>${esc(model.side)}</p>` : ""}
+    <h2 class="sefs-section">心理特征和行为特征</h2>
+    <p class="scl-sub">前 10 项是心理特征，后 10 项是行为特征，各满分 50。分档名称不是诊断。</p>
+    <section class="sefs-dims">${model.rows.filter((item) => item.id !== "total").map(jyArticle).join("")}</section>
+    ${marked}
+    ${notes}
+    <p class="sefs-notice">${esc(JUYING_NOTICE)}</p>
+    <p class="sefs-notice">${esc(JUYING_DISCLAIMER)}</p>
+    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+  `;
+}
+
+function hollandSlot(id) {
+  const meta = HOLLAND_DIMS.find((item) => item.id === id);
+  return { ...meta, score: null, max: 100 };
+}
+
+function hollandCodeOf(report, view, score, result) {
+  const candidates = [result.code, view.holland_code, view.hollandCode, score.holland_code, score.hollandCode, view.code];
+  for (const candidate of candidates) {
+    const code = text(candidate).toUpperCase();
+    if (/^[RIASEC]{3}$/.test(code)) return code;
+  }
+  const loose = candidates.map((candidate) => text(candidate)).find(Boolean);
+  return loose || "";
+}
+
+function readHolland(report) {
+  const safe = report || {};
+  const slots = new Map(HOLLAND_DIMS.map((item) => [item.id, hollandSlot(item.id)]));
+  const view = viewModelOf(safe);
+  const score = calcOf(safe);
+  const result = asObj(safe.result) || {};
+  for (const bag of [scoreBag(score), scoreBag(view)]) {
+    if (!bag) continue;
+    for (const key of Object.keys(bag)) {
+      const id = aliasId(HOLLAND_ALIAS, key);
+      const value = finiteNum(bag[key]);
+      if (id && value != null && !["dominance", "differentiation", "breadth"].includes(key)) slots.get(id).score = value;
+    }
+  }
+  const dims = Array.isArray(safe.dimensions) ? safe.dimensions : [];
+  for (const dim of dims) {
+    if (!dim || typeof dim !== "object") continue;
+    const id = aliasId(HOLLAND_ALIAS, dim.id) || aliasId(HOLLAND_ALIAS, dim.name);
+    if (!id) continue;
+    const value = finiteNum(dim.score);
+    if (value != null) slots.get(id).score = value;
+    const max = finiteNum(dim.max);
+    if (max != null && max > 0) slots.get(id).max = max;
+    if (text(dim.narrative)) slots.get(id).line = text(dim.narrative);
+  }
+  const code = hollandCodeOf(safe, view, score, result);
+  const ranking = [];
+  const rankSource = Array.isArray(view.ranking) ? view.ranking : Array.isArray(score.ranking) ? score.ranking : code.split("");
+  for (const item of rankSource) {
+    const id = aliasId(HOLLAND_ALIAS, item);
+    if (id && !ranking.includes(id)) ranking.push(id);
+  }
+  const rest = HOLLAND_DIMS.map((item) => item.id)
+    .filter((id) => !ranking.includes(id))
+    .sort((a, b) => (slots.get(b).score ?? -1) - (slots.get(a).score ?? -1) || a.localeCompare(b));
+  const order = ranking.concat(rest).map((id) => slots.get(id));
+  const structure = asObj(view.structure) || asObj(score.structure) || {};
+  const bands = asObj(view.bands) || asObj(score.bands) || {};
+  const quality = []
+    .concat(Array.isArray(view.quality) ? view.quality : [], Array.isArray(score.quality) ? score.quality : [], Array.isArray(result.flags) ? result.flags : [])
+    .map((item) => HOLLAND_QUALITY[text(item)] || "")
+    .filter(Boolean);
+  const explore = asObj(view.explore) || asObj(safe.extensionData && safe.extensionData.openText) || {};
+  const quote = text(explore.q1);
+  const facts = [];
+  const dominance = HOLLAND_DOM[text(bands.dominance)] || "";
+  const differentiation = HOLLAND_DIF[text(bands.differentiation)] || "";
+  const consistency = HOLLAND_CON[text(structure.consistency)] || "";
+  const breadth = HOLLAND_BREADTH[text(bands.breadth)] || "";
+  if (dominance) facts.push(["主次", dominance]);
+  if (differentiation) facts.push(["区分度", differentiation]);
+  if (consistency) facts.push(["一致性", consistency]);
+  if (breadth) facts.push(["广度", breadth]);
+  const summary = text(result.summary);
+  const headline = text(result.headline);
+  return {
+    scaleName: text(safe.assessmentName) || HOLLAND_SCALE,
+    headline,
+    code,
+    label: text(result.label),
+    summary: summary && summary !== headline ? summary : "",
+    order,
+    facts,
+    quality: [...new Set(quality)],
+    quote,
+    empty: !code && order.every((item) => item.score == null),
+    notes: freshLines(proseLines(safe), [headline, summary, quote, HOLLAND_NOTICE]),
+    nickname: text(safe.nickname),
+    completedAt: safe.completedAt,
+    version: versionText(safe.assessmentVersion),
+  };
+}
+
+function hollandArticle(slot) {
+  return `
+    <article class="sefs-dim">
+      <div class="sefs-dim-head">
+        <h3>${esc(slot.name)} ${esc(slot.id)}</h3>
+        <p class="sefs-score">${esc(showScore(slot.score))}</p>
+      </div>
+      <div class="sefs-track" aria-hidden="true"><div class="sefs-fill holland-fill" style="width:${barWidth(slot).toFixed(1)}%"></div></div>
+      <p class="scl-narrative">${esc(slot.line)}</p>
+    </article>
+  `;
+}
+
+export function renderHollandReport(report) {
+  const model = readHolland(report);
+  const code = /^[RIASEC]{3}$/.test(model.code)
+    ? `<p class="holland-code">${model.code.split("").map((letter) => `<span>${letter}</span>`).join("")}</p>`
+    : (model.code ? `<p class="holland-code">${esc(model.code)}</p>` : "");
+  const who = `<p class="scl-who">${esc(model.scaleName)}</p>`;
+  const facts = model.facts.length
+    ? `<h2 class="sefs-section">兴趣结构</h2><ul class="pair-list">${model.facts.map(([name, value]) => `<li><span>${esc(name)}</span><b>${esc(value)}</b></li>`).join("")}</ul>`
+    : "";
+  const quality = model.quality.length
+    ? `<section class="sefs-insight">${model.quality.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    : "";
+  const quote = model.quote ? `<h2 class="sefs-section">你写下的投入</h2><p>${esc(model.quote)}</p>` : "";
+  const notes = model.notes.length
+    ? `<section class="sefs-insight">${model.notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>`
+    : "";
+  return `
+    <p class="read-note">这是同一份结果的阅读页。兴趣分数和交卷时一样，这里不能改。</p>
+    ${who}
+    <h2 class="sefs-name">${esc(model.headline || "核心兴趣组合")}</h2>
+    ${code}
+    ${model.label ? `<p class="scl-lead">${esc(model.label)}</p>` : ""}
+    <p class="sefs-kicker">${esc(HOLLAND_NOTICE)}</p>
+    ${model.summary ? `<p>${esc(model.summary)}</p>` : ""}
+    ${model.empty ? `<p class="state">这份结果里没有可显示的兴趣分数。</p>` : ""}
+    ${quality}
+    <h2 class="sefs-section">六个兴趣</h2>
+    <section class="sefs-dims">${model.order.map(hollandArticle).join("")}</section>
+    ${facts}
+    ${quote}
+    ${notes}
+    <p class="sefs-notice">${esc(HOLLAND_NOTICE)}</p>
+    <p class="meta">${esc(model.nickname)} · ${esc(when(model.completedAt))} · ${esc(model.version)}</p>
+  `;
+}
+
 export function renderReport(report) {
   if (report && report.assessmentId === "star") return renderStarReport(report);
   if (report && report.assessmentId === "sefs") return renderSefsReport(report);
@@ -2664,5 +3121,8 @@ export function renderReport(report) {
   if (report && report.assessmentId === "pdq4") return renderPdq4Report(report);
   if (report && report.assessmentId === "ecr") return renderEcrReport(report);
   if (report && report.assessmentId === "root") return renderRootReport(report);
+  if (report && report.assessmentId === "loves5") return renderLoves5Report(report);
+  if (report && report.assessmentId === "juying") return renderJuyingReport(report);
+  if (report && report.assessmentId === "holland") return renderHollandReport(report);
   return `<p class="state">这份报告的阅读页还没接上。${esc(report && report.assessmentName || "")}</p>`;
 }
