@@ -1,5 +1,5 @@
 import { renderHollandReport as renderHollandMap } from "./holland-report.js";
-import { JUYING_BAND_COPY, JUYING_GROUPS, JUYING_REFERENCE_INTRO } from "./juying-bands.js";
+import { JUYING_BAND_COPY, JUYING_DEGREES, JUYING_GROUPS, JUYING_REFERENCE_INTRO } from "./juying-bands.js";
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -2873,7 +2873,8 @@ const LOVE_ALIAS = {
   e: "E", touch: "E", physicaltouch: "E", 身体的接触: "E", 身体接触: "E",
 };
 
-// 巨婴测评：不按 20 项重算。id 是 total / mind / act。分档 id 是 mature、partial、infant、child。
+// 巨婴测评：总分、心理特征、行为特征和分档不按 20 项重算。
+// 逐项分数用已上传的 answers 对照本地题库还原，不改上传协议。id 是 total / mind / act。分档 id 是 mature、partial、infant、child。
 const JUYING_NOTICE = "这是讲座对照，不是诊断，也不是心理评估。";
 const JUYING_DISCLAIMER = "非严肃科学，仅供讲座听众理解学习。";
 const JUYING_SCALE = "巨婴测评";
@@ -3050,6 +3051,44 @@ function jyId(value) {
   return aliasId(JUYING_ALIAS, value);
 }
 
+function juyingItemScore(value) {
+  if (typeof value === "boolean") return null;
+  const n = finiteNum(value);
+  if (n == null || !Number.isInteger(n) || n < 0 || n > 5) return null;
+  return n;
+}
+
+function juyingAnswerList(report, view, score) {
+  const extension = asObj(report && report.extensionData) || {};
+  const lists = [view.answers, extension.answers, score.answers];
+  for (const list of lists) {
+    if (!Array.isArray(list) || list.length !== 20) continue;
+    const values = list.map(juyingItemScore);
+    if (values.every((value) => value != null)) return values;
+  }
+  return null;
+}
+
+function juyingRowsFromAnswers(answers) {
+  const rows = [];
+  let cursor = 0;
+  for (const group of JUYING_GROUPS) {
+    for (const item of group.items) {
+      const value = answers[cursor];
+      cursor += 1;
+      const degree = JUYING_DEGREES.find((entry) => entry.value === value);
+      rows.push({
+        group: group.name,
+        n: String(item.n),
+        text: item.text,
+        score: value,
+        label: degree ? degree.label : "",
+      });
+    }
+  }
+  return rows;
+}
+
 function readJuying(report) {
   const safe = report || {};
   const slots = new Map(JUYING_ORDER.map((item) => [item.id, { ...item, score: null }]));
@@ -3080,6 +3119,7 @@ function readJuying(report) {
     ? code
     : (JUYING_BAND_COPY.find((item) => item.name === band)?.id || "");
   const markedList = Array.isArray(view.marked) ? view.marked : Array.isArray(score.marked) ? score.marked : null;
+  let markedKnown = Array.isArray(markedList);
   const marked = [];
   for (const item of markedList || []) {
     if (!item || typeof item !== "object") continue;
@@ -3110,6 +3150,18 @@ function readJuying(report) {
     });
     if (itemRows.length) break;
   }
+  if (!itemRows.length) {
+    const answers = juyingAnswerList(safe, view, score);
+    if (answers) {
+      itemRows.push(...juyingRowsFromAnswers(answers));
+      if (!markedKnown) {
+        markedKnown = true;
+        for (const row of itemRows) {
+          if (row.score >= 4) marked.push({ ...row });
+        }
+      }
+    }
+  }
   const side = text(view.side) || text(score.side) || "";
   const summary = text(result.summary);
   const rows = JUYING_ORDER.map((item) => slots.get(item.id));
@@ -3118,7 +3170,7 @@ function readJuying(report) {
     headline: text(result.headline) || (band ? `${band}${rows[0].score != null ? ` · ${showScore(rows[0].score)} 分` : ""}` : ""),
     band,
     bandId,
-    markedKnown: Array.isArray(markedList),
+    markedKnown,
     side: side && side !== summary ? side : "",
     summary: summary && summary !== text(result.headline) ? summary : "",
     rows,

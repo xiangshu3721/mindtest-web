@@ -1484,6 +1484,7 @@ test("巨婴测评画出总分、分档、两边分数，并写明不是诊断",
   assert.equal(html.includes("30 <small>/ 50</small>"), true);
   assert.equal(html.includes("11 <small>/ 50</small>"), true);
   assert.equal(html.includes("求认可，求关注。"), true);
+  assert.equal(html.includes("逐项分数"), false);
   assert.equal(html.includes("不是诊断"), true);
   assert.equal(html.includes("非严肃科学，仅供讲座听众理解学习。"), true);
   assert.equal(html.includes("分档名称不是诊断。"), true);
@@ -1500,8 +1501,56 @@ test("巨婴测评画出总分、分档、两边分数，并写明不是诊断",
 
   const empty = renderJuyingReport({ assessmentId: "juying" });
   assert.equal(empty.includes("这份结果里没有可显示的分数。"), true);
+  assert.equal(empty.includes("逐项分数"), false);
   assert.equal(empty.includes("不是诊断"), true);
   assert.equal(empty.includes("这份报告的阅读页还没接上"), false);
+
+  const answers = Array(20).fill(2);
+  answers[0] = 5;
+  answers[10] = 4;
+  answers[19] = 0;
+  const fromAnswers = renderJuyingReport({
+    assessmentId: "juying",
+    nickname: "小林",
+    dimensions: [
+      { id: "total", score: 43, max: 100 },
+      { id: "mind", score: 23, max: 50 },
+      { id: "act", score: 20, max: 50 },
+    ],
+    result: { code: "partial", label: "有部分巨婴特质" },
+    extensionData: { answers },
+  });
+  assert.equal(fromAnswers.includes("逐项分数"), true);
+  assert.equal(fromAnswers.includes("0 到 5 都列在这里。4 分和 5 分用深色标出。"), true);
+  assert.equal(fromAnswers.includes("求认可，求关注。"), true);
+  assert.equal(fromAnswers.includes("5 · 与我一样"), true);
+  assert.equal(fromAnswers.includes("冲动、草率，不顾后果。"), true);
+  assert.equal(fromAnswers.includes("4 · 很像"), true);
+  assert.equal(fromAnswers.includes("好奇心重，但胆子小。爱惹麻烦，不能摆平麻烦。"), true);
+  assert.equal(fromAnswers.includes("0 · 一点也不像"), true);
+  assert.equal(fromAnswers.includes('class="hot"'), true);
+  assert.equal((fromAnswers.match(/<li class="/g) || []).length, 20);
+  assert.equal(fromAnswers.includes("23 <small>/ 50</small>"), true);
+  assert.equal(fromAnswers.includes("心理特征 1"), true);
+
+  const fromView = renderJuyingReport({
+    assessmentId: "juying",
+    result: { code: "mature", label: "心智成熟" },
+    extensionData: { score: { total: 0, mind: 0, act: 0 } },
+    reportContent: { viewModel: { answers: Array(20).fill(0) } },
+  });
+  assert.equal(fromView.includes("逐项分数"), true);
+  assert.equal(fromView.includes("没有单项达到 4 分"), true);
+  assert.equal((fromView.match(/0 · 一点也不像/g) || []).length, 20);
+  assert.equal(fromView.includes('class="hot"'), false);
+
+  const badAnswers = renderJuyingReport({
+    assessmentId: "juying",
+    result: { code: "mature" },
+    extensionData: { answers: Array(20).fill("<script>alert(1)</script>"), score: { total: 0, mind: 0, act: 0 } },
+  });
+  assert.equal(badAnswers.includes("逐项分数"), false);
+  assert.equal(badAnswers.includes("<script>"), false);
 
   const hostile = renderJuyingReport({
     assessmentId: "juying",
@@ -1565,6 +1614,13 @@ test("霍兰德兴趣探索画出三字码、六个分数和结构", () => {
   assert.equal(html.includes("把它放进生活看看"), true);
   assert.equal(html.includes("可以体验些什么"), true);
   assert.equal(html.includes("如果把这张兴趣地图放进工作世界"), true);
+  assert.equal(html.includes("你这次没有选择和工作相关"), false);
+  assert.equal(html.includes("这次的关注点里没有专业、工作或转型"), false);
+  assert.equal(html.includes('class="rsec is-collapsed" id="sec-career"'), false);
+  assert.equal(html.includes('<div class="more" hidden>'), false);
+  assert.equal(html.includes("工程与技术"), true);
+  assert.equal(html.includes("兴趣主题"), true);
+  assert.equal(html.includes('aria-expanded="true"'), true);
   assert.equal(html.includes("实际 R × 研究 I × 艺术 A"), true);
   assert.equal(html.includes("dc-score\">80"), true);
   assert.equal(html.includes("第一兴趣相对突出"), true);
@@ -1584,6 +1640,39 @@ test("霍兰德兴趣探索画出三字码、六个分数和结构", () => {
   assert.equal(aliased.includes(">S</b>"), true);
   assert.equal(aliased.includes("dc-score\">70"), true);
   assert.equal(aliased.includes("社会"), true);
+
+  const closedCareer = renderHollandReport({
+    assessmentId: "holland",
+    result: { code: "RIA" },
+    dimensions: [
+      { id: "R", score: 80 },
+      { id: "I", score: 60 },
+      { id: "A", score: 40 },
+      { id: "S", score: 30 },
+      { id: "E", score: 20 },
+      { id: "C", score: 10 },
+    ],
+    reportContent: { viewModel: { explore: { q3: ["兴趣爱好"] } } },
+  });
+  assert.equal(closedCareer.includes('class="rsec is-collapsed" id="sec-career"'), true);
+  assert.equal(closedCareer.includes('<div class="more" hidden>'), true);
+  assert.equal(closedCareer.includes("这次的关注点里没有专业、工作或转型，工作世界先收着。需要的话可以展开。"), true);
+  assert.equal(closedCareer.includes("你这次没有选择和工作相关"), false);
+
+  const emptyExplore = renderHollandReport({
+    assessmentId: "holland",
+    nickname: "小林",
+    result: { code: "SEC" },
+    extensionData: {
+      openText: {},
+      score: { hollandCode: "SEC", scores: { social: 70, enterprising: 66, conventional: 40, realistic: 20, investigative: 10, artistic: 8 } },
+    },
+  });
+  assert.equal(emptyExplore.includes("你这次没有选择和工作相关"), false);
+  assert.equal(emptyExplore.includes("这次的关注点里没有专业、工作或转型"), false);
+  assert.equal(emptyExplore.includes('<div class="more" hidden>'), false);
+  assert.equal(emptyExplore.includes("教育与培训"), true);
+  assert.equal(emptyExplore.includes('aria-expanded="true"'), true);
 
   const empty = renderHollandReport({ assessmentId: "holland" });
   assert.equal(empty.includes('<span class="r-nick">我</span><span class="red">的兴趣地图</span>'), true);

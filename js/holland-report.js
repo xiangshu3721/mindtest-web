@@ -426,7 +426,9 @@ function buildSections(stored) {
     const career = C.career;
     const p12 = career.pairs[pairKey(t1, t2)];
     const p13 = career.pairs[pairKey(t1, t3)];
-    const careerOpen = Boolean(F.career);
+    // 云端故意不上传开放题。q3 为空不能当成「没选工作」，工作世界默认展开。
+    const careerAnswered = ex.q3.length > 0;
+    const careerOpen = !careerAnswered || Boolean(F.career);
     const section = {
       id: "career",
       title: career.title,
@@ -436,7 +438,7 @@ function buildSections(stored) {
       blocks: [{ t: "p", text: career.intro }],
       more: [],
     };
-    if (!careerOpen) section.blocks.push({ t: "note", text: career.collapsedNote });
+    if (careerAnswered && !careerOpen) section.blocks.push({ t: "note", text: career.collapsedNote });
     if (p12 && p13) {
       section.more = [
         {
