@@ -115,6 +115,7 @@ export function renderResultBody(opts: {
     ${drama}
     ${book}
 
+    <div class="cloud-share" data-cloud-share></div>
     <p class="save-note" data-save-note></p>
     <div class="sticky-bar">
       <button class="btn primary" data-export>导出图片</button>
