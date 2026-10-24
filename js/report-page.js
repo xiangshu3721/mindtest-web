@@ -1,11 +1,9 @@
 import { ASSESSMENT_CLOUD_CONFIG } from "./assessment-cloud-config.js";
 import { parseShareHash, resolveEndpoint } from "./cloud-client.js";
-import { renderReport, sharePageTitle } from "./report-render.js?v=cloud10";
+import { isKnownReader, renderReport, sharePageTitle } from "./report-render.js?v=cloud11";
 
 const box = document.querySelector("#report");
 const endpoint = resolveEndpoint(location, { ...ASSESSMENT_CLOUD_CONFIG, ...(window.ASSESSMENT_CLOUD_CONFIG || {}) });
-const KNOWN_ASSESSMENTS = ["star", "sefs", "scl90", "pdq4", "ecr", "root", "loves5", "juying", "holland"];
-
 function applyPageTitle(report) {
   const title = sharePageTitle(report);
   document.title = title;
@@ -15,7 +13,7 @@ function applyPageTitle(report) {
   }
   const shell = document.querySelector("article.sheet > h1");
   if (!shell) return;
-  if (KNOWN_ASSESSMENTS.includes(report && report.assessmentId)) shell.remove();
+  if (isKnownReader(report && report.assessmentId)) shell.remove();
   else shell.textContent = title;
 }
 

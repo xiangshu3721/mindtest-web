@@ -1,3 +1,4 @@
+import { ASVA_READER_IDS, renderBeattieReport, renderGcdReport, renderSensmapReport, renderZhenaiReport } from "./asva-report.js";
 import { renderHollandReport as renderHollandMap } from "./holland-report.js";
 import { JUYING_BAND_COPY, JUYING_DEGREES, JUYING_GROUPS, JUYING_REFERENCE_INTRO } from "./juying-bands.js";
 
@@ -24,11 +25,37 @@ const SHARE_TITLES = {
   loves5: "爱的五种语言",
   juying: "巨婴测评",
   star: "职业六芒星",
+  zhenai: "珍爱金字塔",
+  gcd: "个人充电",
+  sensmap: "心力地图",
+  "beattie-emotional-health": "情绪健康测试",
+  "beattie-anger": "愤怒测试",
+  "beattie-fear": "恐惧测试",
+  "beattie-drama": "戏剧化与不幸成瘾测试",
+  "beattie-guilt": "内疚测试",
+  "beattie-grief": "悲痛与失落测试",
 };
+
+export const KNOWN_READER_IDS = [
+  "star", "sefs", "scl90", "pdq4", "ecr", "root", "loves5", "juying", "holland",
+  ...ASVA_READER_IDS,
+];
+
+export function isKnownReader(id) {
+  return KNOWN_READER_IDS.includes(id);
+}
 
 export function sharePageTitle(report) {
   const nick = visibleNickname(report && report.nickname);
-  const phrase = SHARE_TITLES[report && report.assessmentId];
+  const id = report && report.assessmentId;
+  if (typeof id === "string" && id.startsWith("beattie-")) {
+    const view = report.reportContent && report.reportContent.viewModel;
+    const phrase = view && typeof view.title === "string" && view.title.trim()
+      ? view.title.trim()
+      : SHARE_TITLES[id];
+    if (phrase) return `${nick}的${phrase}`;
+  }
+  const phrase = SHARE_TITLES[id];
   if (phrase) return `${nick}的${phrase}`;
   const name = report && typeof report.assessmentName === "string" ? report.assessmentName.trim() : "";
   return name ? `${nick}的${name}` : `${nick}的测评报告`;
@@ -3320,5 +3347,9 @@ export function renderReport(report) {
   if (report && report.assessmentId === "loves5") return renderLoves5Report(report);
   if (report && report.assessmentId === "juying") return renderJuyingReport(report);
   if (report && report.assessmentId === "holland") return renderHollandReport(report);
+  if (report && report.assessmentId === "zhenai") return renderZhenaiReport(report);
+  if (report && report.assessmentId === "gcd") return renderGcdReport(report);
+  if (report && report.assessmentId === "sensmap") return renderSensmapReport(report);
+  if (report && isKnownReader(report.assessmentId) && String(report.assessmentId).startsWith("beattie-")) return renderBeattieReport(report);
   return `<p class="state">这份报告的阅读页还没接上。${esc(report && report.assessmentName || "")}</p>`;
 }
