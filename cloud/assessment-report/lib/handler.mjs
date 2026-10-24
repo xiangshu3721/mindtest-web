@@ -1,5 +1,5 @@
 import { byteSize, canonical, safeEqual, sha256 } from "./ids.mjs";
-import { MAX_BODY_BYTES, validateSecrets, validateStarResult } from "./validate.mjs";
+import { MAX_BODY_BYTES, validateAssessmentResult, validateSecrets } from "./validate.mjs";
 import { buildGithubShareUrl, indexRow } from "./feishu.mjs";
 import { GITHUB_PAGES_ORIGIN, HTTP_ORIGIN } from "./preview.mjs";
 
@@ -96,7 +96,7 @@ export function createHandler(options) {
     const result = body && body.result;
     const linkSecret = body && body.linkSecret;
     const ownerToken = body && body.ownerToken;
-    const issues = validateSecrets(linkSecret, ownerToken).concat(validateStarResult(result));
+    const issues = validateSecrets(linkSecret, ownerToken).concat(validateAssessmentResult(result));
     if (issues.length) return finish(422, { error: "invalid", issues });
 
     const submissionId = result.source.clientSubmissionId;

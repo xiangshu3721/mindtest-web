@@ -5,6 +5,28 @@ export const REPORT_ID_RE = /^rpt_[A-Za-z0-9_-]{11,64}$/;
 export const SECRET_RE = /^[A-Za-z0-9_-]{16,128}$/;
 export const SUBMISSION_RE = /^sub_[A-Za-z0-9_-]{8,64}$/;
 
+/** assessmentReportDev 可保存的测评。新增 id 必须在 validate.mjs 里有对应校验。 */
+export const ALLOWED_ASSESSMENT_IDS = [
+  "star",
+  "sefs",
+  "scl90",
+  "pdq4",
+  "ecr",
+  "root",
+  "loves5",
+  "juying",
+  "holland",
+  "zhenai",
+  "gcd",
+  "sensmap",
+  "beattie-emotional-health",
+  "beattie-anger",
+  "beattie-fear",
+  "beattie-drama",
+  "beattie-guilt",
+  "beattie-grief",
+];
+
 export function assertDevCollection(name) {
   const value = String(name || "");
   if (value !== DEV_COLLECTION && !value.startsWith(`${DEV_COLLECTION}_`)) {
