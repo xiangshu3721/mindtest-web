@@ -53,10 +53,10 @@ test("旧的六芒星报告仍然可读", () => {
 });
 
 test("其他测评仍提示阅读页还没接上", () => {
-  const html = renderReport({ assessmentId: "zhenai", assessmentName: "珍爱金字塔" });
-  assert.equal(html.includes("这份报告的阅读页还没接上。珍爱金字塔"), true);
+  const html = renderReport({ assessmentId: "nope-assessment", assessmentName: "还没接的测评" });
+  assert.equal(html.includes("这份报告的阅读页还没接上。还没接的测评"), true);
   assert.equal(renderReport(null).includes("这份报告的阅读页还没接上。"), true);
-  for (const id of ["Loves5", "5loves", "Juying", "Holland"]) {
+  for (const id of ["Loves5", "5loves", "Juying", "Holland", "beattie", "Zhenai"]) {
     assert.equal(renderReport({ assessmentId: id, assessmentName: id }).includes("这份报告的阅读页还没接上"), true, id);
   }
 });
@@ -1701,7 +1701,256 @@ test("分享页标题用昵称，空昵称降级为我", () => {
   assert.equal(sharePageTitle({ assessmentId: "scl90" }), "我的症状自评量表");
   assert.equal(sharePageTitle({ assessmentId: "juying", nickname: "小林" }), "小林的巨婴测评");
   assert.equal(sharePageTitle({ assessmentId: "nope", assessmentName: "珍爱金字塔", nickname: "小林" }), "小林的珍爱金字塔");
+  assert.equal(sharePageTitle({ assessmentId: "zhenai", nickname: "小林" }), "小林的珍爱金字塔");
+  assert.equal(sharePageTitle({ assessmentId: "gcd" }), "我的个人充电");
+  assert.equal(sharePageTitle({ assessmentId: "sensmap", nickname: "小林" }), "小林的心力地图");
+  assert.equal(sharePageTitle({
+    assessmentId: "beattie-anger",
+    nickname: "小林",
+    reportContent: { viewModel: { title: "愤怒测试" } },
+  }), "小林的愤怒测试");
+  assert.equal(sharePageTitle({ assessmentId: "beattie-grief" }), "我的悲痛与失落测试");
   assert.equal(sharePageTitle(null), "我的测评报告");
+});
+
+function zhenaiSample() {
+  return {
+    assessmentId: "zhenai",
+    assessmentName: "珍爱金字塔 · 自我关系状态评估",
+    assessmentVersion: "zhenai-h5-v1",
+    nickname: "小林",
+    completedAt: "2026-10-24T09:00:00+08:00",
+    result: { headline: "最薄的一层是「平和性」", code: "E", label: "平和性", summary: "开场" },
+    recommendations: [{ id: "footer", text: "这不是诊断。" }],
+    reportContent: {
+      viewModel: {
+        scores: { A: 80, B: 70, C: 66, D: 64, E: 40, F: 72 },
+        total: 62,
+        totalLevel: { id: "usable", name: "可用成长层" },
+        levels: { E: { id: "repair", name: "提醒修复层" } },
+        lowest: "E",
+        highest: "A",
+        opening: "你的「允许接纳」是目前最扎实的一层",
+        resource: { title: "资源：允许接纳", tag: "80 分 · 稳定资源层", paras: ["这一层是资源。"] },
+        leak: { title: "漏能量层：平和性", tag: "40 分 · 提醒修复层", paras: ["这里在漏。", "可以先照顾它。"] },
+        relationCards: [{ title: "接纳托住平和", body: "两层会互相影响。" }],
+        recommendation: { title: "优先修复主题", tag: "平和性 40", paras: ["先做这一层。"], boldFirst: true },
+        practice: { title: "7天自我练习 · 平和性", intro: "每天对自己说这一句：", sentence: "“我可以慢慢回到稳定。”", how: "写下来就好。" },
+        dims: [
+          { key: "A", name: "允许接纳", score: 80, levelId: "stable", levelName: "稳定资源层", sub: "允许", desc: "已具备" },
+          { key: "E", name: "平和性 · 漏", score: 40, levelId: "repair", levelName: "提醒修复层", sub: "情绪", desc: "耗能点" },
+        ],
+      },
+    },
+  };
+}
+
+test("珍爱金字塔阅读页画出六维、总分和最薄的一层，不放打卡和重测", () => {
+  const html = renderReport(zhenaiSample());
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("最薄的一层是「平和性」"), true);
+  assert.equal(html.includes("加权总分（参考）"), true);
+  assert.equal(html.includes(">62<"), true);
+  assert.equal(html.includes("资源：允许接纳"), true);
+  assert.equal(html.includes("漏能量层：平和性"), true);
+  assert.equal(html.includes("接纳托住平和"), true);
+  assert.equal(html.includes("我可以慢慢回到稳定。"), true);
+  assert.equal(html.includes("这不是诊断。"), true);
+  assert.equal(html.includes("小林"), true);
+  assert.equal(html.includes("data-d="), false);
+  assert.equal(html.includes("重新测一次"), false);
+  assert.equal(html.includes("保存完整报告图"), false);
+  const hostile = renderReport({
+    ...zhenaiSample(),
+    nickname: "<b>小林</b>",
+    reportContent: { viewModel: { ...zhenaiSample().reportContent.viewModel, opening: "<script>alert(1)</script>" } },
+  });
+  assert.equal(hostile.includes("<script>"), false);
+  assert.equal(hostile.includes("&lt;script&gt;"), true);
+  assert.equal(hostile.includes("<b>小林</b>"), false);
+});
+
+test("个人充电阅读页画出电量、链路和修复，不放历史和我做了", () => {
+  const html = renderReport({
+    assessmentId: "gcd",
+    assessmentVersion: "gcd-h5-v1",
+    nickname: "小林",
+    completedAt: "2026-10-24T09:00:00+08:00",
+    reportContent: {
+      viewModel: {
+        score: 41,
+        band: { key: "drain", label: "持续耗电", tagline: "电在一直漏。" },
+        stateLine: "你说的状态：有点累，还撑得住",
+        dims: { body: 60, emotion: 20, relation: 10, world: 5 },
+        dimLevels: { body: "比较耗", emotion: "还好", relation: "还好", world: "还好" },
+        dimMeta: [
+          { key: "body", name: "身体与节律", desc: "睡得怎样。" },
+          { key: "emotion", name: "情绪稳定", desc: "容易绷着。" },
+          { key: "relation", name: "关系边界", desc: "关系在耗电。" },
+          { key: "world", name: "世界与意义", desc: "世界变窄。" },
+        ],
+        topDim: "body",
+        sourceLabels: ["身体", "刷手机"],
+        chain: [
+          { key: "lack", name: "匮乏", on: true, now: "现在落在匮乏。", next: "下一步是补节律。", cut: "先别加任务。" },
+          { key: "tangle", name: "纠缠", on: false },
+        ],
+        insight: { band: "41 分，电在漏。", dim: "身体漏得最多。", check: "今天睡了吗？", shift: "先动一小步。", disclaimer: "这不是诊断。" },
+        low: false,
+        steps: [{ n: 1, name: "停一下", on: true }, { n: 2, name: "补一口", on: false }],
+        actions: [{ title: "喝一口温水", minutes: 1, step: 1, stepName: "停一下", srcName: "身体", how: ["倒一杯温水。"], why: "先让身体知道你在。" }],
+        fields: [{ title: "窗边", why: "光线稳一点。", use: "站两分钟。" }],
+        fieldAvoid: "少刷一会。",
+        trainings: [{ title: "说一句界限", when: "被人拉住时", steps: ["先停半秒。"], say: "我今天只能陪十分钟。" }],
+        coreLine: "先把自己的充电口修好。",
+      },
+    },
+  });
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("今天的电量"), true);
+  assert.equal(html.includes("持续耗电"), true);
+  assert.equal(html.includes("你说的状态：有点累，还撑得住"), true);
+  assert.equal(html.includes("漏得最多"), true);
+  assert.equal(html.includes("现在落在匮乏。"), true);
+  assert.equal(html.includes("喝一口温水"), true);
+  assert.equal(html.includes("先把自己的充电口修好。"), true);
+  assert.equal(html.includes("最近几天"), false);
+  assert.equal(html.includes("我做了"), false);
+  assert.equal(html.includes("重新选一次"), false);
+  const unmatched = renderReport({
+    assessmentId: "gcd",
+    nickname: "小林",
+    reportContent: { viewModel: { score: 55, stateLine: "你说的状态：自己写的状态（没认出具体意思，按中间值 55 起算）", band: { key: "recover", label: "恢复充电" } } },
+  });
+  assert.equal(unmatched.includes("自己写的状态"), true);
+  assert.equal(unmatched.includes("按中间值 55 起算"), true);
+  assert.equal(unmatched.includes("customText"), false);
+});
+
+test("六套情绪测试共用阅读页，戏剧化才出现先看悲痛", () => {
+  const anger = renderReport({
+    assessmentId: "beattie-anger",
+    assessmentName: "愤怒测试",
+    nickname: "小林",
+    assessmentVersion: "beattie-anger-h5-v1",
+    completedAt: "2026-10-24T09:00:00+08:00",
+    reportContent: {
+      viewModel: {
+        testId: "anger",
+        title: "愤怒测试",
+        chapter: "3",
+        theme: "怒气需要被安放。",
+        studyNote: "这是学习笔记，不是诊断。",
+        sections: { assessment: 40, mcq: 10, tf: 20 },
+        total: 70,
+        maxPossible: 230,
+        band: { min: 61, max: 90, text: "书中原话在这里。" },
+        insight: { min: 61, max: 90, lamp: "黄灯", tone: "gold", headline: "怒气还在找位置。", means: ["你在忍。"], actions: ["先说一句我现在很生气。"] },
+        dramaNote: null,
+      },
+    },
+  });
+  assert.equal(anger.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(anger.includes("小林的愤怒测试"), true);
+  assert.equal(anger.includes("黄灯"), true);
+  assert.equal(anger.includes("这意味着什么"), true);
+  assert.equal(anger.includes("你可以怎么做"), true);
+  assert.equal(anger.includes("书中原话"), true);
+  assert.equal(anger.includes("先看悲痛"), false);
+  assert.equal(anger.includes("导出图片"), false);
+  assert.equal(anger.includes("重做"), false);
+  assert.equal(anger.includes("angerFill"), false);
+  const drama = renderReport({
+    assessmentId: "beattie-drama",
+    nickname: "小林",
+    reportContent: {
+      viewModel: {
+        title: "戏剧化与不幸成瘾测试",
+        chapter: "5",
+        sections: { assessment: 80, mcq: 20, tf: 40 },
+        total: 140,
+        maxPossible: 230,
+        insight: { lamp: "红灯", tone: "danger", headline: "戏还在上演。", means: ["分数偏高。"], actions: ["先照顾悲痛。"] },
+        dramaNote: "悲痛还鲜活时，这套分数容易失真。",
+        band: { min: 100, max: 160, text: "原文。" },
+      },
+    },
+  });
+  assert.equal(drama.includes("小林的戏剧化与不幸成瘾测试"), true);
+  assert.equal(drama.includes("先看悲痛"), true);
+  assert.equal(drama.includes("悲痛还鲜活时"), true);
+  assert.equal(renderReport({ assessmentId: "beattie" }).includes("这份报告的阅读页还没接上"), true);
+});
+
+test("心力地图阅读页画出摘要、维度和课题，不放自述和换方向", () => {
+  const html = renderReport({
+    assessmentId: "sensmap",
+    nickname: "小林",
+    assessmentVersion: "sensmap-h5-v1",
+    completedAt: "2026-10-24T09:00:00+08:00",
+    reportContent: {
+      viewModel: {
+        productName: "高敏感心力地图",
+        summary: "你现在最需要先看被接纳感。",
+        helpNotice: "如果很难撑下去，请联系信任的人。",
+        questionBankVersion: "QB-1.1.0",
+        ruleVersion: "RR-1.1.0",
+        boundary: "这是自我探索与需求梳理，不是临床诊断。",
+        dimensions: [
+          {
+            id: "F",
+            name: "原生家庭",
+            score: 50,
+            band: "困扰较频繁",
+            deterministic: true,
+            summaryLine: "原生家庭 · 50 · 困扰较频繁",
+            subs: [{ id: "F1", name: "被接纳感", score: 70 }, { id: "F2", name: "需求表达", score: 30 }],
+            highlights: [{ questionId: "F01", text: "家里很少夸我", answerLabel: "经常符合" }],
+            daily: "不满意时会收成我不够好。",
+            alternative: "也可能是最近压力大。",
+            step: "先补一句具体的事。",
+            human: "影响睡眠时可以找人聊聊。",
+            helpNote: null,
+          },
+          { id: "R", name: "情感关系", score: 20, band: "偶尔", deterministic: true, summaryLine: "情感关系 · 20", subs: [], highlights: [], daily: "", alternative: "", step: "", human: "" },
+        ],
+        patterns: [{
+          id: "p1",
+          name: "先否定自己",
+          nodes: [{ key: "a", label: "触发", text: "被比较。", mode: "seen", questionIds: ["F01"] }],
+        }],
+        clue: { title: "待核对", text: "这里还不写成确定模式。" },
+        topic: {
+          primaryName: "被接纳感",
+          primaryDimName: "原生家庭",
+          secondaryName: "需求表达",
+          secondaryReason: "紧挨着。",
+          action: "把“我不够好”改成一件具体的事。",
+          basis: ["系统原先建议的首要课题是「需求表达」。", "你改看了被接纳感。"],
+          showBoth: false,
+        },
+        anomalies: [],
+      },
+    },
+  });
+  assert.equal(html.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(html.includes("小林的心力地图"), true);
+  assert.equal(html.includes("你现在最需要先看被接纳感。"), true);
+  assert.equal(html.includes("逐项看懂我的心力地图"), true);
+  assert.equal(html.includes("原生家庭"), true);
+  assert.equal(html.includes("第 1 题"), true);
+  assert.equal(html.includes("个人模式画像"), true);
+  assert.equal(html.includes("待核对"), true);
+  assert.equal(html.includes("被接纳感"), true);
+  assert.equal(html.includes("系统原先建议的首要课题是「需求表达」。"), true);
+  assert.equal(html.includes("不是临床诊断"), true);
+  assert.equal(html.includes("你写下的情境"), false);
+  assert.equal(html.includes("我想先看别的方向"), false);
+  assert.equal(html.includes("重新测试"), false);
+  assert.equal(html.includes("导出图片"), false);
+  const empty = renderReport({ assessmentId: "sensmap", nickname: "<img src=x>" });
+  assert.equal(empty.includes("这份报告的阅读页还没接上"), false);
+  assert.equal(empty.includes("<img"), false);
 });
 
 test("只有 assessmentId 正好是 root 才画寻根之旅", () => {
