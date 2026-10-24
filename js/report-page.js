@@ -1,6 +1,6 @@
 import { ASSESSMENT_CLOUD_CONFIG } from "./assessment-cloud-config.js";
 import { parseShareHash, resolveEndpoint } from "./cloud-client.js";
-import { renderReport, sharePageTitle } from "./report-render.js?v=cloud9";
+import { renderReport, sharePageTitle } from "./report-render.js?v=cloud10";
 
 const box = document.querySelector("#report");
 const endpoint = resolveEndpoint(location, { ...ASSESSMENT_CLOUD_CONFIG, ...(window.ASSESSMENT_CLOUD_CONFIG || {}) });

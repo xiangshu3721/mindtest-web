@@ -1,6 +1,6 @@
 export const JUYING_DISCLAIMER_TEXT = "非严肃科学，仅供讲座听众理解学习。";
 
-const DEGREES = [
+export const JUYING_DEGREES = [
   { value: 0, label: "一点也不像" },
   { value: 1, label: "不太像" },
   { value: 2, label: "有一点像" },
