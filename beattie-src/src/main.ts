@@ -12,6 +12,7 @@ import {
   loadDraft,
   clearDraft,
 } from './lib/storage';
+import { mountBeattieCloud } from './cloud-share';
 import { renderArchiveCard, renderResultBody, summaryOfEntry } from './ui/result';
 
 type Step = 'warning' | 'assessment' | 'mcq' | 'tf' | 'result';
@@ -57,7 +58,7 @@ function exportEntry(entry: ArchiveEntry) {
   document.body.appendChild(host);
   let sec: unknown[] = [];
   try {
-    sec = RK.capture(host, { skip: '.save-note,.sticky-bar' });
+    sec = RK.capture(host, { skip: '.save-note,.sticky-bar,.cloud-share' });
   } catch {
     sec = [];
   }
@@ -493,6 +494,17 @@ function renderTest(test: QuizTest) {
       persist();
       paint();
     });
+
+    const cloudSlot = app.querySelector<HTMLElement>('[data-cloud-share]');
+    if (cloudSlot && draft.step === 'result') {
+      mountBeattieCloud(cloudSlot, {
+        testId: test.id,
+        nickname: RK && RK.nick.get() ? RK.nick.get() : '',
+        likert: draft.likert,
+        mcq: draft.mcq,
+        tf: draft.tf,
+      });
+    }
 
     const note = app.querySelector<HTMLElement>('[data-save-note]');
     if (note) {
