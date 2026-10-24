@@ -523,6 +523,40 @@ body[data-assessment="star"] { background: #f3ece4; }
 .scl-map .formulas, .pdq-map .formulas, .ecr-map .formulas { margin-top: 22px; color: #6d645b; font-size: 13px; }
 .scl-map .symptoms { list-style: none; margin: 8px 0 0; padding: 0; }
 .scl-map .symptoms li { display: grid; grid-template-columns: 2.4em 1fr auto; gap: 8px; padding: 8px 0; border-bottom: 1px solid rgba(36, 30, 24, 0.12); font-size: 14px; }
+.scl-map .ledger,
+.pdq-map .ledger,
+.ecr-map .ledger { margin-top: 22px; }
+.scl-map .ledger summary,
+.pdq-map .ledger summary,
+.ecr-map .ledger summary { cursor: pointer; color: #6d645b; }
+.scl-map .ledger ol,
+.pdq-map .ledger ol,
+.ecr-map .ledger ol { margin: 12px 0 0; padding: 0; list-style: none; }
+.scl-map .ledger li,
+.pdq-map .ledger li,
+.ecr-map .ledger li {
+  display: grid;
+  grid-template-columns: 3.2em minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(36, 30, 24, 0.12);
+  font-size: 13px;
+}
+.scl-map .ledger b,
+.pdq-map .ledger b,
+.ecr-map .ledger b { font-variant-numeric: tabular-nums; font-weight: 500; }
+.scl-map .ledger li span:last-child,
+.pdq-map .ledger li span:last-child,
+.ecr-map .ledger li span:last-child { color: #6d645b; white-space: nowrap; }
+@media (max-width: 720px) {
+  .scl-map .ledger li,
+  .pdq-map .ledger li,
+  .ecr-map .ledger li { grid-template-columns: 2.4em minmax(0, 1fr); }
+  .scl-map .ledger li span:last-child,
+  .pdq-map .ledger li span:last-child,
+  .ecr-map .ledger li span:last-child { grid-column: 2; white-space: normal; }
+}
 .pdq-map h1, .ecr-map h1 { font-size: clamp(32px, 6vw, 48px); margin-top: 4px; }
 .pdq-map .lead, .ecr-map .lead, .jy-map .lead { max-width: 38rem; }
 .pdq-map h2, .ecr-map h2, .jy-map h2 { margin: 28px 0 8px; font-family: var(--serif); font-size: 26px; font-weight: 500; }

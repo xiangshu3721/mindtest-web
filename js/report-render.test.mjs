@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { WORDS } from "../star/js/data.js";
 import { buildStarResult } from "../star/js/cloud-payload.js";
-import { SCALES, TOO_GOOD_REVERSE } from "../pdq/js/data.js";
+import { QUESTIONS as PDQ_QUESTIONS, SCALES, TOO_GOOD_REVERSE } from "../pdq/js/data.js";
 import { scorePdq4 } from "../pdq/js/score.js";
-import { FACTORS } from "../scl90/js/data.js";
+import { FACTORS, QUESTIONS as SCL_QUESTIONS } from "../scl90/js/data.js";
 import { scoreScl90 } from "../scl90/js/score.js";
 import { QUESTIONS, REVERSE_ITEMS } from "../ecr/js/data.js";
 import { scoreEcr } from "../ecr/js/score.js";
@@ -790,7 +790,7 @@ test("PDQ-4 协议对象画出十二量表、效度和分群，viewModel 盖过�
   assert.equal(html.includes(`<b>${scored.positiveCount}</b><span>达到划界</span>`), true);
   assert.equal(html.includes(`<b>${scored.total}</b><span>十二维合计</span>`), true);
   assert.equal(html.includes("<b>999</b>"), false);
-  assert.equal(html.includes("<b>11</b>"), false);
+  assert.equal(html.includes("<b>11</b><span>达到划界</span>"), false);
   assert.equal(html.includes("合计把第 60 题算了两次"), true);
   assert.equal(html.split("pdq-hit").length - 1, scored.positiveCount);
   for (let i = 1; i < PDQ_NAMES.length; i += 1) {
@@ -908,8 +908,8 @@ test("PDQ-4 只给了部分维度时仍能读，答案不会被拿来重算", ()
   assert.equal(html.includes("达到划界的是偏执型。"), true);
   assert.equal(html.includes("<b>1</b><span>达到划界</span>"), true);
   assert.equal(html.includes("<b>5</b><span>十二维合计</span>"), true);
-  assert.equal(html.includes("<b>94</b>"), false);
-  assert.equal(html.includes("<b>12</b>"), false);
+  assert.equal(html.includes("<b>94</b><span>十二维合计</span>"), false);
+  assert.equal(html.includes("<b>12</b><span>达到划界</span>"), false);
   assert.equal(html.includes("边缘型</h3>"), true);
   assert.equal(html.includes("未达到"), true);
 });
@@ -1096,6 +1096,99 @@ test("ECR 贴着中点时写出恐惧型，并标出并列或贴近的说明", (
   assert.equal(html.includes("统一阅读页目前只重绘"), false);
   assert.equal(html.includes("若只按 4 分切成四格"), false);
   assert.equal(html.includes(`<span>恐惧型 · 最高</span><b>${scored.types.find((type) => type.win).m.toFixed(2)}</b>`), true);
+});
+
+test("SCL-90、PDQ-4、ECR 有完整作答时列出题详，没有或不完整时不留空壳", () => {
+  assert.equal(SCL_QUESTIONS.length, 90);
+  assert.equal(PDQ_QUESTIONS.length, 126);
+  assert.equal(QUESTIONS.length, 36);
+
+  const sclAnswers = Array(90).fill(1);
+  sclAnswers[14] = 4;
+  const scl = renderReport({
+    assessmentId: "scl90",
+    nickname: "阿禾",
+    reportContent: { viewModel: { answers: sclAnswers, total: 93, gsi: 1.03 } },
+    extensionData: { answers: Array(90).fill(5) },
+  });
+  assert.equal((scl.match(/<details class="ledger">/g) || []).length, 1);
+  assert.equal(scl.includes("查看 90 题的作答"), true);
+  assert.equal(scl.includes(`<b>01</b><span>${SCL_QUESTIONS[0]}</span><span>没有</span>`), true);
+  assert.equal(scl.includes(`<b>15</b><span>${SCL_QUESTIONS[14]}</span><span>偏重</span>`), true);
+  assert.equal(scl.includes(`<b>01</b><span>${SCL_QUESTIONS[0]}</span><span>严重</span>`), false);
+  assert.equal(scl.includes("十个方面"), true);
+
+  const sclEmpty = renderReport({ assessmentId: "scl90", nickname: "阿禾" });
+  assert.equal(sclEmpty.includes("查看 90 题的作答"), false);
+  assert.equal(sclEmpty.includes('<details class="ledger">'), false);
+  assert.equal(sclEmpty.includes("十个方面"), true);
+
+  const sclShort = renderReport({
+    assessmentId: "scl90",
+    extensionData: { answers: [1, 2, 3], score: { total: 6 } },
+  });
+  assert.equal(sclShort.includes("查看 90 题的作答"), false);
+  assert.equal(sclShort.includes("十个方面"), true);
+
+  const sclBad = renderReport({
+    assessmentId: "scl90",
+    extensionData: { answers: Array(90).fill("<script>alert(1)</script>"), score: { gsi: 1 } },
+  });
+  assert.equal(sclBad.includes("查看 90 题的作答"), false);
+  assert.equal(sclBad.includes("<script>"), false);
+  assert.equal(sclBad.includes("十个方面"), true);
+
+  const fromScore = renderReport({
+    assessmentId: "scl90",
+    extensionData: { score: { answers: Array(90).fill(2), gsi: 2, total: 180 } },
+  });
+  assert.equal(fromScore.includes(`<b>02</b><span>${SCL_QUESTIONS[1]}</span><span>很轻</span>`), true);
+
+  const pdqAnswers = Array(126).fill(0);
+  pdqAnswers[0] = 1;
+  pdqAnswers[125] = 1;
+  const pdq = renderReport({
+    assessmentId: "pdq4",
+    extensionData: { answers: pdqAnswers, score: { total: 2, positiveCount: 0 } },
+  });
+  assert.equal((pdq.match(/<details class="ledger">/g) || []).length, 1);
+  assert.equal(pdq.includes("查看 126 题的作答"), true);
+  assert.equal(pdq.includes(`<b>01</b><span>${PDQ_QUESTIONS[0]}</span><span>是</span>`), true);
+  assert.equal(pdq.includes(`<b>02</b><span>${PDQ_QUESTIONS[1]}</span><span>否</span>`), true);
+  assert.equal(pdq.includes(`<b>126</b><span>${PDQ_QUESTIONS[125]}</span><span>是</span>`), true);
+
+  const pdqEmpty = renderReport({ assessmentId: "pdq4" });
+  assert.equal(pdqEmpty.includes("查看 126 题的作答"), false);
+  assert.equal(pdqEmpty.includes('<details class="ledger">'), false);
+  assert.equal(pdqEmpty.includes("筛查不是诊断"), true);
+
+  const pdqBad = renderReport({
+    assessmentId: "pdq4",
+    extensionData: { answers: Array(126).fill(2), score: { total: 0, positiveCount: 0 } },
+  });
+  assert.equal(pdqBad.includes("查看 126 题的作答"), false);
+  assert.equal(pdqBad.includes("筛查不是诊断"), true);
+
+  const ecrAnswers = Array(36).fill(1);
+  ecrAnswers[2] = 7;
+  const ecr = renderReport({
+    assessmentId: "ecr",
+    reportContent: { viewModel: { answers: ecrAnswers, avoidance: { mean: 2 }, anxiety: { mean: 2 } } },
+  });
+  assert.equal((ecr.match(/<details class="ledger">/g) || []).length, 1);
+  assert.equal(ecr.includes("查看 36 题的作答"), true);
+  assert.equal(ecr.includes(`<b>01</b><span>${QUESTIONS[0]}</span><span>非常不同意</span>`), true);
+  assert.equal(REVERSE_ITEMS.includes(3), true);
+  assert.equal(ecr.includes(`<b>03</b><span>${QUESTIONS[2]}</span><span>非常同意 · 计 1</span>`), true);
+  assert.equal(ecr.includes(`<b>02</b><span>${QUESTIONS[1]}</span><span>非常不同意 · 计`), false);
+
+  const ecrEmpty = renderReport({
+    assessmentId: "ecr",
+    extensionData: { answers: Array(36).fill(null) },
+  });
+  assert.equal(ecrEmpty.includes("查看 36 题的作答"), false);
+  assert.equal(ecrEmpty.includes('<details class="ledger">'), false);
+  assert.equal(ecrEmpty.includes("这份结果里没有可显示的分数。"), true);
 });
 
 const ROOT_MODULES = ["主体性", "情感力", "关系力", "价值力"];
