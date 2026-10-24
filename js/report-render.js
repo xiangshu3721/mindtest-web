@@ -1,3 +1,6 @@
+import { QUESTIONS as ECR_QUESTIONS, OPTIONS as ECR_OPTIONS, REVERSE_ITEMS as ECR_REVERSE_ITEMS } from "../ecr/js/data.js";
+import { QUESTIONS as PDQ_QUESTIONS } from "../pdq/js/data.js";
+import { QUESTIONS as SCL_QUESTIONS } from "../scl90/js/data.js";
 import { ASVA_READER_IDS, renderBeattieReport, renderGcdReport, renderSensmapReport, renderZhenaiReport } from "./asva-report.js";
 import { renderHollandReport as renderHollandMap } from "./holland-report.js";
 import { JUYING_BAND_COPY, JUYING_DEGREES, JUYING_GROUPS, JUYING_REFERENCE_INTRO } from "./juying-bands.js";
@@ -813,6 +816,71 @@ function answersOf(report, pack) {
   return null;
 }
 
+// 题详只对照本地题库展示已上传的 answers，不重算分数。长度或取值对不上就不留空壳。
+const ECR_REVERSE = new Set(ECR_REVERSE_ITEMS);
+const ECR_OPTION_LABEL = Object.fromEntries(ECR_OPTIONS.map((option) => [option.value, option.label]));
+
+function padItem(n) {
+  return String(n).padStart(2, "0");
+}
+
+function integerAnswerList(report, length, valid) {
+  if (!report || typeof report !== "object") return null;
+  const pack = sourcesOf(report);
+  const lists = [pack.viewModel.answers, pack.extension.answers, pack.score && pack.score.answers];
+  for (const list of lists) {
+    if (!Array.isArray(list) || list.length !== length) continue;
+    const values = [];
+    let ok = true;
+    for (const value of list) {
+      if (typeof value !== "number" || !Number.isInteger(value) || !valid(value)) {
+        ok = false;
+        break;
+      }
+      values.push(value);
+    }
+    if (ok) return values;
+  }
+  return null;
+}
+
+function ledgerDetails(summary, rows) {
+  return `<details class="ledger"><summary>${esc(summary)}</summary><ol>${rows}</ol></details>`;
+}
+
+function sclLedger(report) {
+  const answers = integerAnswerList(report, SCL_QUESTIONS.length, (value) => value >= 1 && value <= 5);
+  if (!answers || answers.length !== 90) return "";
+  const rows = SCL_QUESTIONS.map((item, index) => `
+    <li><b>${padItem(index + 1)}</b><span>${esc(item)}</span><span>${esc(SCL_OPTIONS[answers[index]] || "")}</span></li>
+  `).join("");
+  return ledgerDetails("查看 90 题的作答", rows);
+}
+
+function pdqLedger(report) {
+  const answers = integerAnswerList(report, PDQ_QUESTIONS.length, (value) => value === 0 || value === 1);
+  if (!answers || answers.length !== 126) return "";
+  const rows = PDQ_QUESTIONS.map((item, index) => `
+    <li><b>${padItem(index + 1)}</b><span>${esc(item)}</span><span>${answers[index] === 1 ? "是" : "否"}</span></li>
+  `).join("");
+  return ledgerDetails("查看 126 题的作答", rows);
+}
+
+function ecrLedger(report) {
+  const answers = integerAnswerList(report, ECR_QUESTIONS.length, (value) => value >= 1 && value <= 7);
+  if (!answers || answers.length !== 36) return "";
+  const rows = ECR_QUESTIONS.map((item, index) => {
+    const raw = answers[index];
+    const reversed = ECR_REVERSE.has(index + 1);
+    const label = ECR_OPTION_LABEL[raw] || "";
+    const tail = reversed ? `${label} · 计 ${8 - raw}` : label;
+    return `
+      <li><b>${padItem(index + 1)}</b><span>${esc(item)}</span><span>${esc(tail)}</span></li>
+    `;
+  }).join("");
+  return ledgerDetails("查看 36 题的作答", rows);
+}
+
 function lineList(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
@@ -1176,6 +1244,7 @@ export function renderScl90Report(report) {
       ${guidance}
       ${extraHtml}
       ${notable}
+      ${sclLedger(report)}
       <div class="formulas">
         <p>总分 = 90 题相加。总症状指数 = 总分 ÷ 90。</p>
         <p>阳性项目 = 选了很轻及以上的题。阴性项目 = 选了「没有」的题。阳性症状均分 = 阳性题得分之和 ÷ 阳性题数。</p>
@@ -1605,6 +1674,7 @@ export function renderPdq4Report(report) {
         ${conductLine}
         <p>第 98–105 题保留在问卷中，不计入这 12 个分量表。掩饰和怀疑的 6 题也不计入。这是筛查，不是诊断。</p>
       </div>
+      ${pdqLedger(report)}
       ${notes.length ? `<section class="notes">${notes.map((line) => `<p>${esc(line)}</p>`).join("")}</section>` : ""}
       ${guidance}
       ${extra}
@@ -1616,7 +1686,7 @@ export function renderPdq4Report(report) {
 // ECR 阅读约定：不按 36 题重算。字段对齐即将写入 mindtest ecr/js/cloud-payload.js 的 buildEcrResult。
 // viewModel 优先，其次 result / dimensions，再退到 extensionData.score（scoreEcr 的返回）。
 // 回避、焦虑的 score 或 mean 是 1–7 均分，4 是量表中点。四型用判别分 m，最高的一项是类型。
-// 缺数字留「—」，不补 0，也不用 answers 重算。页上写明筛查不是诊断。
+// 缺数字留「—」，不补 0，也不用 answers 重算均分或类型。题详只在作答完整时列出。页上写明筛查不是诊断。
 const ECR_NOTICE = "这是筛查，不是诊断，也不能代替面谈。类型来自回避均分和焦虑均分的判别式，说的是恋爱经历里常常有的感觉，不能据此判断一段关系该不该继续。";
 const ECR_KICKER = "筛查不是诊断。类型是四个判别分里最高的一项，不能代替面谈。";
 const ECR_READER_GAP = "统一阅读页目前只重绘";
@@ -2120,6 +2190,7 @@ export function renderEcrReport(report) {
         <li>再看四个判别分。最高的一项才是类型，不按“超过 4 分就划进高的一边”来切。</li>
         <li>这是你在恋爱经历里常常有的感觉，不是对某一次吵架的结论，也不能代替两个人具体怎么相处。</li>
       </ul>
+      ${ecrLedger(report)}
       <div class="formulas">
         <p>回避均分 A = 奇数题之和 ÷ 18。焦虑均分 B = 偶数题之和 ÷ 18。</p>
         <p>安全型 = A×3.2893296 + B×5.4725318 − 11.5307833</p>
