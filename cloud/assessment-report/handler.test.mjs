@@ -20,6 +20,14 @@ import { buildJuyingResult } from "./vendor/juying-payload.mjs";
 import { scoreJuying } from "./vendor/juying-score.mjs";
 import { buildHollandResult } from "./vendor/holland-payload.mjs";
 import { scoreHolland } from "./vendor/holland-score.mjs";
+import { buildZhenaiResult } from "./vendor/zhenai-payload.mjs";
+import { computeResult as scoreZhenai } from "./vendor/zhenai/scoring.js";
+import { buildGcdResult } from "./vendor/gcd-payload.mjs";
+import { scoreGcd } from "./vendor/gcd-score.mjs";
+import { buildSensmapResult } from "./vendor/sensmap-payload.mjs";
+import { QUESTIONS as SENSMAP_QUESTIONS } from "./vendor/sensmap-engine.mjs";
+import { buildBeattieResult, BEATTIE_TESTS } from "./vendor/beattie-payload.mjs";
+import { getTestById } from "./vendor/beattie-engine.mjs";
 import { REVERSE_ITEMS as ECR_REVERSE_ITEMS } from "../../ecr/js/data.js";
 import { scoreEcr as pageScoreEcr } from "../../ecr/js/score.js";
 import { createHandler } from "./lib/handler.mjs";
@@ -1370,7 +1378,11 @@ function rootBody(answers, developmentAnswers, extra = {}, id = ids()) {
 }
 
 test("寻根之旅按三十三题和四道发展题重算后可保存，错误作答或未知测评仍是 422，已放行测评仍可保存", async () => {
-  assert.deepEqual(ALLOWED_ASSESSMENT_IDS, ["star", "sefs", "scl90", "pdq4", "ecr", "root", "loves5", "juying", "holland"]);
+  assert.deepEqual(ALLOWED_ASSESSMENT_IDS, [
+    "star", "sefs", "scl90", "pdq4", "ecr", "root", "loves5", "juying", "holland",
+    "zhenai", "gcd", "sensmap",
+    "beattie-emotional-health", "beattie-anger", "beattie-fear", "beattie-drama", "beattie-guilt", "beattie-grief",
+  ]);
   const threes = Array(33).fill(3);
   const dev = [3, 3, 3, 3];
   const uniform = scoreRoot(threes);
@@ -1866,3 +1878,206 @@ function LovesSum(leftScores, rightScores) {
     E: leftScores.E + rightScores.E,
   };
 }
+
+function sensmapAnswers(fill = 1, extra = {}) {
+  const answers = {};
+  for (const question of SENSMAP_QUESTIONS) answers[question.id] = extra[question.id] ?? (question.allowNa ? 1 : fill);
+  return answers;
+}
+
+test("珍爱金字塔、个人充电、高敏感心力地图和六套情绪测试按作答重算后可保存", async () => {
+  const feishu = createFeishuIndex({ FEISHU_INDEX_MODE: "mock" });
+  const { handle, store } = app({ feishu });
+  const when = "2026-10-24T09:00:00+08:00";
+
+  const high = Array(36).fill(5);
+  const low = Array(36).fill(1);
+  assert.equal(scoreZhenai(high).total > scoreZhenai(low).total, true);
+  assert.equal(scoreZhenai(Array(36).fill(3)).allEqual, true);
+  const zhenaiIds = ids();
+  const zhenai = buildZhenaiResult({
+    nickname: "小林",
+    answers: Array(36).fill(4),
+    rushed: false,
+    completedAt: when,
+    ...zhenaiIds,
+  });
+  assert.equal(zhenai.assessmentId, "zhenai");
+  assert.equal(zhenai.assessmentVersion, "zhenai-h5-v1");
+  assert.equal(zhenai.dimensions.map((item) => item.id).join(""), "ABCDEF");
+  assert.deepEqual(validateAssessmentResult(JSON.parse(JSON.stringify(zhenai))), []);
+  const zhenaiSaved = await post({ handle }, "/v1/results", {
+    result: JSON.parse(JSON.stringify(zhenai)),
+    linkSecret: zhenaiIds.linkSecret,
+    ownerToken: zhenaiIds.ownerToken,
+  }, { ip: "203.0.113.180" });
+  assert.equal(zhenaiSaved.status, 200);
+  assert.equal(feishu.rows[0]["测评 ID"], "zhenai");
+  assert.equal(feishu.rows[0]["测评名称"], "珍爱金字塔 · 自我关系状态评估");
+  assert.equal(feishu.rows[0]["分享链接"], buildGithubShareUrl(zhenai.reportId, zhenaiIds.linkSecret));
+  assert.equal(feishu.rows[0]["分享链接"].startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
+  const zhenaiShift = buildZhenaiResult({ nickname: "小林", answers: Array(36).fill(4), completedAt: when, ...ids() });
+  zhenaiShift.dimensions[0].score = 0;
+  assert.equal((await post({ handle }, "/v1/results", {
+    result: zhenaiShift, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.181" })).status, 422);
+  assert.equal(buildZhenaiResult({
+    nickname: "13800138000", answers: Array(36).fill(3), completedAt: when, ...ids(),
+  }), null);
+
+  const gcdScore = scoreGcd({ stateId: "tired", customUnmatched: false, sourceIds: ["body", "phone"], dayIndex: 20000 });
+  assert.equal(gcdScore.score, 41);
+  assert.equal(gcdScore.stateLabel, "有点累，还撑得住");
+  assert.equal(gcdScore.customUnmatched, false);
+  const gcd = buildGcdResult({
+    nickname: "小林",
+    stateId: "tired",
+    customUnmatched: false,
+    sourceIds: ["body", "phone"],
+    dayIndex: 20000,
+    rushed: true,
+    completedAt: when,
+    ...ids(),
+  });
+  assert.equal(gcd.assessmentVersion, "gcd-h5-v1");
+  assert.deepEqual(gcd.reportContent.viewModel.actionIds ? [] : gcd.extensionData.score.actionIds, gcdScore.actions.map((item) => item.id));
+  assert.equal(JSON.stringify(gcd).includes("customText"), false);
+  assert.deepEqual(validateAssessmentResult(JSON.parse(JSON.stringify(gcd))), []);
+  const gcdSaved = await post({ handle }, "/v1/results", {
+    result: JSON.parse(JSON.stringify(gcd)),
+    linkSecret: randomSecret(32),
+    ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.182" });
+  assert.equal(gcdSaved.status, 200);
+  assert.equal(feishu.rows[1]["测评 ID"], "gcd");
+  assert.equal(feishu.rows[1]["分享链接"].startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
+  assert.equal(JSON.stringify(feishu.rows[1]).includes("刷手机"), false);
+  const unmatched = buildGcdResult({
+    nickname: "小林",
+    stateId: null,
+    customUnmatched: true,
+    sourceIds: [],
+    dayIndex: 3,
+    completedAt: when,
+    ...ids(),
+  });
+  assert.equal(unmatched.reportContent.viewModel.stateLabel, "自己写的状态");
+  assert.equal(unmatched.reportContent.viewModel.stateLine.includes("按中间值 55 起算"), true);
+  assert.equal(unmatched.extensionData.score.score, 55);
+  assert.deepEqual(validateAssessmentResult(JSON.parse(JSON.stringify(unmatched))), []);
+  const withText = JSON.parse(JSON.stringify(gcd));
+  withText.extensionData.customText = "有点烦，又有点累";
+  const textRejected = await post({ handle }, "/v1/results", {
+    result: withText, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.183" });
+  assert.equal(textRejected.status, 422);
+  assert.equal(textRejected.body.issues.some((item) => item.includes("customText")), true);
+  assert.equal(buildGcdResult({
+    nickname: "小林", customText: "累", stateId: "tired", sourceIds: [], dayIndex: 1, completedAt: when, ...ids(),
+  }), null);
+
+  const answers = sensmapAnswers(2);
+  const sens = buildSensmapResult({
+    nickname: "小林",
+    answers,
+    impact: { F: 1, R: 1, E: 4, M: 0 },
+    scenarioAnswers: [
+      { questionId: "S-F1", optionId: "A" },
+      { questionId: "S-F2", optionId: "B" },
+    ],
+    choice: "E",
+    overrideSubId: null,
+    rushed: false,
+    completedAt: when,
+    ...ids(),
+  });
+  assert.equal(sens.assessmentId, "sensmap");
+  assert.equal(sens.assessmentVersion, "sensmap-h5-v1");
+  assert.equal(Object.prototype.hasOwnProperty.call(sens.reportContent.viewModel, "narrative"), false);
+  assert.equal(JSON.stringify(sens).includes("独有自述"), false);
+  assert.deepEqual(validateAssessmentResult(JSON.parse(JSON.stringify(sens))), []);
+  const sensSaved = await post({ handle }, "/v1/results", {
+    result: JSON.parse(JSON.stringify(sens)),
+    linkSecret: randomSecret(32),
+    ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.184" });
+  assert.equal(sensSaved.status, 200);
+  assert.equal(feishu.rows[2]["测评 ID"], "sensmap");
+  assert.equal(feishu.rows[2]["分享链接"].startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
+  const story = JSON.parse(JSON.stringify(sens));
+  story.reportContent.viewModel.narrative = "这段话不该上传";
+  const storyRejected = await post({ handle }, "/v1/results", {
+    result: story, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.185" });
+  assert.equal(storyRejected.status, 422);
+  assert.equal(storyRejected.body.issues.some((item) => item.includes("narrative")), true);
+  const badScene = buildSensmapResult({
+    nickname: "小林",
+    answers,
+    impact: { F: 1, R: 1, E: 1, M: 1 },
+    scenarioAnswers: [
+      { questionId: "S-M1", optionId: "A" },
+      { questionId: "S-M2", optionId: "A" },
+    ],
+    choice: "unclear",
+    completedAt: when,
+    ...ids(),
+  });
+  assert.equal(badScene, null);
+
+  for (const spec of BEATTIE_TESTS) {
+    const test = getTestById(spec.testId);
+    const made = buildBeattieResult({
+      nickname: "小林",
+      assessmentId: spec.id,
+      testId: spec.testId,
+      likert: Array(test.likertItems.length).fill(6),
+      mcq: test.mcqItems.map((item) => item.options[0].key),
+      tf: test.tfItems.map((item) => (spec.testId === "guilt" && item.id === 6 ? "NA" : "yes")),
+      rushed: false,
+      completedAt: when,
+      ...ids(),
+    });
+    assert.equal(made.assessmentVersion, `${spec.id}-h5-v1`);
+    assert.equal(made.source.origin, "in-repo");
+    assert.equal(made.source.path, "beattie/index.html");
+    assert.equal(JSON.stringify(made).includes("angerFill"), false);
+    assert.deepEqual(validateAssessmentResult(JSON.parse(JSON.stringify(made))), []);
+    const saved = await post({ handle }, "/v1/results", {
+      result: JSON.parse(JSON.stringify(made)),
+      linkSecret: randomSecret(32),
+      ownerToken: randomSecret(32),
+    }, { ip: "203.0.113.186" });
+    assert.equal(saved.status, 200, spec.id);
+  }
+  const anger = buildBeattieResult({
+    nickname: "小林",
+    assessmentId: "beattie-anger",
+    testId: "anger",
+    likert: Array(10).fill(5),
+    mcq: getTestById("anger").mcqItems.map((item) => item.options[0].key),
+    tf: Array(8).fill("yes"),
+    completedAt: when,
+    ...ids(),
+  });
+  anger.extensionData.angerFill = "不该保存的填空";
+  const angerRejected = await post({ handle }, "/v1/results", {
+    result: anger, linkSecret: randomSecret(32), ownerToken: randomSecret(32),
+  }, { ip: "203.0.113.187" });
+  assert.equal(angerRejected.status, 422);
+  assert.equal(angerRejected.body.issues.some((item) => item.includes("angerFill")), true);
+  assert.equal(buildBeattieResult({
+    nickname: "小林",
+    assessmentId: "beattie-anger",
+    testId: "anger",
+    likert: Array(10).fill(5),
+    mcq: getTestById("anger").mcqItems.map((item) => item.options[0].key),
+    tf: Array(8).fill("yes"),
+    angerFill: "填空",
+    completedAt: when,
+    ...ids(),
+  }), null);
+  assert.equal(feishu.rows.at(-1)["分享链接"].startsWith("https://xiangshu3721.github.io/mindtest-web/r/#"), true);
+  assert.equal(store.size(), 3 + BEATTIE_TESTS.length);
+});
+

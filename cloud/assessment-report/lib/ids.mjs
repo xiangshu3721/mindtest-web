@@ -16,6 +16,15 @@ export const ALLOWED_ASSESSMENT_IDS = [
   "loves5",
   "juying",
   "holland",
+  "zhenai",
+  "gcd",
+  "sensmap",
+  "beattie-emotional-health",
+  "beattie-anger",
+  "beattie-fear",
+  "beattie-drama",
+  "beattie-guilt",
+  "beattie-grief",
 ];
 
 export function assertDevCollection(name) {

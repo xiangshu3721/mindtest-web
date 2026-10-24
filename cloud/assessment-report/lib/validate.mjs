@@ -54,6 +54,34 @@ import {
   hollandBodyParts,
   hollandExploreOk,
 } from "../vendor/holland-score.mjs";
+import {
+  ZHENAI_CONSENT_VERSION,
+  ZHENAI_READER_GAP,
+  ZHENAI_VERSION,
+  zhenaiAnswersOk,
+  zhenaiBodyParts,
+} from "../vendor/zhenai-score.mjs";
+import {
+  GCD_CONSENT_VERSION,
+  GCD_READER_GAP,
+  GCD_VERSION,
+  gcdBodyParts,
+  gcdInputOk,
+} from "../vendor/gcd-score.mjs";
+import {
+  SENSMAP_CONSENT_VERSION,
+  SENSMAP_READER_GAP,
+  SENSMAP_VERSION,
+  sensmapAnswersOk,
+  sensmapBodyParts,
+} from "../vendor/sensmap-score.mjs";
+import {
+  BEATTIE_READER_GAP,
+  beattieBodyParts,
+  beattieConsent,
+  beattieSpec,
+  beattieVersion,
+} from "../vendor/beattie-score.mjs";
 import { ALLOWED_ASSESSMENT_IDS, REPORT_ID_RE, SECRET_RE, SUBMISSION_RE } from "./ids.mjs";
 
 export const STAR_VERSION = "star-words-31-v1";
@@ -93,6 +121,21 @@ function scanKeys(value, issues, path) {
 
 const PHONE_VALUE = /(?:^|[^\d])1[3-9]\d{9}(?:$|[^\d])/;
 const PARTIAL_SCOPES = ["store", "share_link", "mentor_read"];
+
+function scanSensitive(value, issues, path) {
+  if (!value || typeof value !== "object") return;
+  const keys = Array.isArray(value) ? [] : Object.keys(value);
+  for (const key of keys) {
+    if (/^(customText|angerFill)$/i.test(key)) issues.push(`${path}.${key} 不能保存`);
+    const story = path === "result"
+      || path === "result.extensionData"
+      || path === "result.reportContent"
+      || path === "result.reportContent.viewModel";
+    if (/^narrative$/i.test(key) && story) issues.push(`${path}.${key} 不能保存`);
+    scanSensitive(value[key], issues, `${path}.${key}`);
+  }
+  if (Array.isArray(value)) value.forEach((item, index) => scanSensitive(item, issues, `${path}[${index}]`));
+}
 
 function scanPhones(value, issues, path) {
   if (typeof value === "string") {
@@ -163,7 +206,7 @@ function checkPartialFrame(result, issues, spec) {
     issues.push("阅读页缺口说明不完整");
   }
   const source = result.source;
-  if (!source || source.origin !== "external-repo" || source.repo !== spec.repo || source.path !== spec.path) {
+  if (!source || source.origin !== (spec.origin || "external-repo") || source.repo !== spec.repo || source.path !== spec.path) {
     issues.push("来源不对");
   }
   if (!source || !SUBMISSION_RE.test(String(source.clientSubmissionId || ""))) issues.push("提交号格式不对");
@@ -1223,8 +1266,173 @@ export function validateHollandResult(result) {
   return issues;
 }
 
+const ZHENAI_EXTENSION_KEYS = new Set(["answers", "score", "quality", "consent", "compat", "attribution"]);
+const GCD_EXTENSION_KEYS = ZHENAI_EXTENSION_KEYS;
+const SENSMAP_EXTENSION_KEYS = new Set([
+  "answers", "impact", "scenarioAnswers", "choice", "overrideSubId", "score", "quality", "consent", "compat", "attribution",
+]);
+const BEATTIE_EXTENSION_KEYS = ZHENAI_EXTENSION_KEYS;
+
+export function validateZhenaiResult(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  const frame = checkPartialFrame(result, issues, {
+    id: "zhenai",
+    name: "珍爱金字塔",
+    version: ZHENAI_VERSION,
+    consent: ZHENAI_CONSENT_VERSION,
+    gap: ZHENAI_READER_GAP,
+    label: "珍爱金字塔",
+    repo: "zhenai-pyramid",
+    path: "index.html",
+    resultKitId: "zhenai",
+    extensionKeys: ZHENAI_EXTENSION_KEYS,
+  });
+  const answers = frame.view && frame.view.answers;
+  if (!zhenaiAnswersOk(answers)) issues.push("作答需要 36 道 1–5 的整数题");
+  if (zhenaiAnswersOk(answers) && typeof frame.rushed === "boolean") {
+    let parts = null;
+    try {
+      parts = zhenaiBodyParts(answers, frame.rushed);
+    } catch {
+      parts = null;
+    }
+    if (!parts) issues.push("作答需要 36 道 1–5 的整数题");
+    else {
+      checkBody(result, issues, parts);
+      if (!sameValue(frame.extension && frame.extension.answers, answers)) issues.push("扩展作答与视图不一致");
+    }
+  }
+  return issues;
+}
+
+export function validateGcdResult(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  const frame = checkPartialFrame(result, issues, {
+    id: "gcd",
+    name: "个人充电",
+    version: GCD_VERSION,
+    consent: GCD_CONSENT_VERSION,
+    gap: GCD_READER_GAP,
+    label: "个人充电",
+    repo: "geren-chongdian",
+    path: "index.html",
+    resultKitId: "gcd",
+    extensionKeys: GCD_EXTENSION_KEYS,
+  });
+  const view = frame.view || {};
+  const input = {
+    stateId: view.stateId,
+    customUnmatched: view.customUnmatched,
+    sourceIds: view.sourceIds,
+    dayIndex: view.dayIndex,
+  };
+  if (!gcdInputOk(input)) issues.push("状态或耗电来源不对");
+  if (gcdInputOk(input) && typeof frame.rushed === "boolean") {
+    let parts = null;
+    try {
+      parts = gcdBodyParts(input, frame.rushed);
+    } catch {
+      parts = null;
+    }
+    if (!parts) issues.push("状态或耗电来源不对");
+    else {
+      checkBody(result, issues, parts);
+      if (!sameValue(frame.extension && frame.extension.answers, parts.answers)) issues.push("扩展作答与视图不一致");
+    }
+  }
+  return issues;
+}
+
+export function validateSensmapResult(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  const frame = checkPartialFrame(result, issues, {
+    id: "sensmap",
+    name: "高敏感心力地图",
+    version: SENSMAP_VERSION,
+    consent: SENSMAP_CONSENT_VERSION,
+    gap: SENSMAP_READER_GAP,
+    label: "高敏感心力地图",
+    repo: "sensitive-map",
+    path: "index.html",
+    resultKitId: "sensmap",
+    extensionKeys: SENSMAP_EXTENSION_KEYS,
+  });
+  const view = frame.view || {};
+  const extension = frame.extension || {};
+  const input = {
+    answers: view.answers,
+    impact: view.impact,
+    scenarioAnswers: view.scenarioAnswers,
+    choice: view.choice,
+    overrideSubId: extension.overrideSubId,
+  };
+  if (!sensmapAnswersOk(input)) issues.push("作答、生活影响或情境题不完整");
+  if (sensmapAnswersOk(input) && typeof frame.rushed === "boolean") {
+    let parts = null;
+    try {
+      parts = sensmapBodyParts(input, frame.rushed);
+    } catch {
+      parts = null;
+    }
+    if (!parts) issues.push("作答、生活影响或情境题不完整");
+    else {
+      checkBody(result, issues, parts);
+      if (!sameValue(extension.answers, parts.answers)) issues.push("扩展作答与视图不一致");
+      if (!sameValue(extension.impact, parts.impact)) issues.push("生活影响与视图不一致");
+      if (!sameValue(extension.scenarioAnswers, parts.scenarioAnswers)) issues.push("情境题与视图不一致");
+      if (extension.choice !== parts.choice) issues.push("最先想改变的领域不一致");
+      if (!sameValue(extension.overrideSubId, parts.overrideSubId)) issues.push("改看的方向不一致");
+    }
+  }
+  return issues;
+}
+
+export function validateBeattieResult(result) {
+  const issues = [];
+  if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  const spec = beattieSpec(result.assessmentId);
+  if (!spec) return ["测评不在可保存范围内"];
+  const frame = checkPartialFrame(result, issues, {
+    id: spec.id,
+    name: spec.name,
+    version: beattieVersion(spec.id),
+    consent: beattieConsent(spec.id),
+    gap: BEATTIE_READER_GAP,
+    label: spec.name,
+    repo: "mindtest-web",
+    path: "beattie/index.html",
+    resultKitId: spec.id,
+    origin: "in-repo",
+    extensionKeys: BEATTIE_EXTENSION_KEYS,
+  });
+  const view = frame.view || {};
+  const input = { testId: spec.testId, likert: view.likert, mcq: view.mcq, tf: view.tf };
+  const answersOk = Array.isArray(view.likert) && Array.isArray(view.mcq) && Array.isArray(view.tf);
+  if (!answersOk || view.testId !== spec.testId) issues.push("作答和这套测试对不上");
+  if (answersOk && view.testId === spec.testId && typeof frame.rushed === "boolean") {
+    let parts = null;
+    try {
+      parts = beattieBodyParts(input, frame.rushed);
+    } catch {
+      parts = null;
+    }
+    if (!parts) issues.push("作答和这套测试对不上");
+    else {
+      checkBody(result, issues, parts);
+      if (!sameValue(frame.extension && frame.extension.answers, parts.answers)) issues.push("扩展作答与视图不一致");
+    }
+  }
+  return issues;
+}
+
 export function validateAssessmentResult(result) {
   if (!result || typeof result !== "object" || Array.isArray(result)) return ["结果必须是对象"];
+  const sensitive = [];
+  scanSensitive(result, sensitive, "result");
+  if (sensitive.length) return sensitive;
   if (!ALLOWED_ASSESSMENT_IDS.includes(result.assessmentId)) return ["测评不在可保存范围内"];
   if (result.assessmentId === "sefs") return validateSefsResult(result);
   if (result.assessmentId === "star") return validateStarResult(result);
@@ -1235,5 +1443,9 @@ export function validateAssessmentResult(result) {
   if (result.assessmentId === "loves5") return validateLoves5Result(result);
   if (result.assessmentId === "juying") return validateJuyingResult(result);
   if (result.assessmentId === "holland") return validateHollandResult(result);
+  if (result.assessmentId === "zhenai") return validateZhenaiResult(result);
+  if (result.assessmentId === "gcd") return validateGcdResult(result);
+  if (result.assessmentId === "sensmap") return validateSensmapResult(result);
+  if (typeof result.assessmentId === "string" && result.assessmentId.startsWith("beattie-")) return validateBeattieResult(result);
   return ["测评不在可保存范围内"];
 }
