@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xiangshu3721.github.io/mindtest-web/schemas/assessment-result-v1.json",
+  "title": "AssessmentResultV1",
+  "description": "ASVA 测评结果统一协议 V1.0。用于知情同意后写入云端、生成独立 H5 报告、以及 ASVA 客户关怀系统按链接只读导入。本文件是设计稿，尚未接入任何测评运行时。完整报告以 reportContent 与 extensionData 无损还原；结构化字段用于检索，不替代原文。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reportId",
+    "assessmentId",
+    "assessmentName",
+    "assessmentVersion",
+    "nickname",
+    "completedAt",
+    "dimensions",
+    "result",
+    "interpretation",
+    "recommendations",
+    "reportContent",
+    "extensionData",
+    "source",
+    "schemaVersion"
+  ],
+  "properties": {
+    "reportId": {
+      "type": "string",
+      "minLength": 21,
+      "maxLength": 80,
+      "pattern": "^rpt_[A-Za-z0-9_-]{16,64}$",
+      "description": "独立报告编号。由浏览器在提交前生成，重试必须复用同一个值。不可猜测，不使用分数编码。"
+    },
+    "assessmentId": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "description": "稳定测评标识。建议值见 audit 清单，例如 scl90、pdq4、ecr、star、beattie-grief、sefs、gcd、sensmap、zhenai、root、5loves、juying、holland。"
+    },
+    "assessmentName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "assessmentVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40,
+      "description": "题库与计分规则版本。现有多数测评没有版本常量，接入时只新增常量，不改算法。高敏感心力地图已有 QB/RR/CT 版本号，应原样写入。"
+    },
+    "nickname": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 12,
+      "description": "客户昵称。与现有 ResultKit 上限一致（1–12 字）。不是手机号，不是登录账号。"
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "交卷时间，ISO-8601，建议带时区。展示时可转上海时区。"
+    },
+    "dimensions": {
+      "type": "array",
+      "maxItems": 64,
+      "description": "可比较的维度。没有分数的测评（职业六芒星）用 kind=category，分数放 null，并把词写入 labels。",
+      "items": { "$ref": "#/$defs/dimension" }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline"],
+      "properties": {
+        "headline": { "type": "string", "maxLength": 200 },
+        "code": { "type": ["string", "null"], "maxLength": 80, "description": "类型码、霍兰德码、分档 id 等短码。没有则 null。" },
+        "label": { "type": ["string", "null"], "maxLength": 120 },
+        "summary": { "type": ["string", "null"], "maxLength": 2000 },
+        "flags": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "maxLength": 64 },
+          "description": "例如 positive、tied、close-call、too-fast、suspect、crisis-urgent。只作标记，不改变原文结论。"
+        }
+      }
+    },
+    "interpretation": {
+      "type": "array",
+      "maxItems": 80,
+      "description": "结果页已经展示给作答者的解释段落，按原顺序。不在云端重写算法。",
+      "items": { "$ref": "#/$defs/block" }
+    },
+    "recommendations": {
+      "type": "array",
+      "maxItems": 40,
+      "items": { "$ref": "#/$defs/block" }
+    },
+    "reportContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format"],
+      "description": "原报告快照。H5 优先用 viewModel 重绘；viewModel 缺字段时用 sections 原文。禁止靠爬页面或 OCR 还原。",
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["view-model+sections", "sections-only", "snapshot-only"]
+        },
+        "viewModel": {
+          "description": "该测评结果页渲染所需的结构化视图。形状因测评而异，完整对象放这里，同时在 extensionData.score 保留计分函数原返回值。",
+          "type": "object"
+        },
+        "sections": {
+          "type": "array",
+          "description": "与现有 result-kit capture/packSections 同形的分节：h/p/ul/table/row/svg/hex。单条建议不超过 70000 字符，与 result-kit 的 SEC_CAP 对齐。",
+          "items": { "type": "object" }
+        },
+        "textFallback": {
+          "type": "string",
+          "maxLength": 20000,
+          "description": "纯文本兜底，给飞书索引预览和无法重绘时的阅读。不是导入档案的唯一依据。"
+        }
+      }
+    },
+    "extensionData": {
+      "type": "object",
+      "description": "无法放进统一字段、但对无损还原必需的内容。允许测评自有形状。不得把密钥放进来。",
+      "properties": {
+        "answers": {},
+        "times": {},
+        "score": { "description": "现有计分函数的原返回值，不做二次计算。" },
+        "profile": { "description": "SCL-90 的姓名/性别/年龄等。默认不进飞书索引列。" },
+        "openText": { "description": "开放回答：愤怒填空、霍兰德探索三问、个人充电自述、心力地图自述等。" },
+        "quality": {},
+        "consent": { "$ref": "#/$defs/consent" },
+        "share": { "$ref": "#/$defs/share" },
+        "compat": { "$ref": "#/$defs/compat" }
+      },
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["site", "path", "clientSubmissionId"],
+      "properties": {
+        "site": { "type": "string", "maxLength": 80 },
+        "path": { "type": "string", "maxLength": 200, "description": "相对 mindtest-web 的路径，或站外完整起点路径。" },
+        "repo": { "type": ["string", "null"], "maxLength": 80 },
+        "origin": {
+          "type": "string",
+          "enum": ["in-repo", "external-repo"]
+        },
+        "pageUrl": { "type": ["string", "null"], "maxLength": 300 },
+        "clientSubmissionId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 80,
+          "description": "防重复提交键。与 reportId 一起由客户端生成，服务端唯一。"
+        },
+        "resultKitId": { "type": ["string", "null"], "maxLength": 80 },
+        "localKey": { "type": ["string", "null"], "maxLength": 120, "description": "仅作对照，云端不回写 localStorage。" }
+      }
+    },
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    }
+  },
+  "$defs": {
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 40 },
+        "kind": { "type": "string", "enum": ["score", "category", "text"] },
+        "score": { "type": ["number", "null"] },
+        "raw": { "type": ["number", "null"] },
+        "max": { "type": ["number", "null"] },
+        "level": { "type": ["string", "null"], "maxLength": 40 },
+        "levelLabel": { "type": ["string", "null"], "maxLength": 40 },
+        "narrative": { "type": ["string", "null"], "maxLength": 4000 },
+        "labels": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 40 },
+          "description": "分类维度上的词或类型名，例如六芒星三个词。"
+        },
+        "extra": { "type": "object" }
+      }
+    },
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "title": { "type": ["string", "null"], "maxLength": 80 },
+        "text": { "type": "string", "maxLength": 8000 }
+      }
+    },
+    "consent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agreed", "version", "at", "scopes"],
+      "properties": {
+        "agreed": { "type": "boolean" },
+        "version": { "type": "string", "maxLength": 40 },
+        "textHash": { "type": "string", "maxLength": 80 },
+        "at": { "type": "string", "format": "date-time" },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["store", "share_link", "mentor_read", "profile_demographics", "open_text", "journey_archive"]
+          }
+        }
+      }
+    },
+    "share": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scope": { "type": "string", "enum": ["link_holder"] },
+        "status": { "type": "string", "enum": ["active", "revoked"] },
+        "revokedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "compat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level"],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["full", "snapshot", "partial"],
+          "description": "full：结构化字段可独立重绘原报告。snapshot：必须靠 reportContent 原文。partial：只上传作答者勾选的子集，例如寻根之旅默认不上传档案全文。"
+        },
+        "gaps": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 200 }
+        }
+      }
+    }
+  }
+}
