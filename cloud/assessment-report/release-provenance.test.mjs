@@ -54,7 +54,18 @@ test("no manifest or malformed manifest never claims an audited deployment", () 
     const file = path.join(dir, "manifest.json");
     assert.deepEqual(loadReleaseMetadata(file), { status: "UNVERIFIED" });
     writeFileSync(file, JSON.stringify(manifest()));
-    assert.equal(loadReleaseMetadata(file).status, "EMBEDDED_UNATTESTED");
+    const loaded = loadReleaseMetadata(file);
+    assert.equal(publicReleaseMetadata(loaded).status, "EMBEDDED_UNATTESTED");
+    const handler = createHandler({
+      store: createMemoryStore("assessment_reports_dev"),
+      feishu: createFeishuIndex({ FEISHU_INDEX_MODE: "off" }),
+      releaseMetadata: loaded,
+      silent: true,
+    });
+    // This is the same load -> handler path used by local-server.
+    // It must NOT inadvertently downgrade a valid embedded manifest.
+    const health = await handler.handle({ method: "GET", path: "/health", headers: {} });
+    assert.equal(health.body.release.status, "EMBEDDED_UNATTESTED");
     writeFileSync(file, "broken");
     assert.deepEqual(loadReleaseMetadata(file), { status: "UNVERIFIED" });
   } finally {
