@@ -8,6 +8,7 @@ import { createCloudBaseStore, createMemoryStore, isCloudStoreDriver } from "./l
 import { createFeishuIndex } from "./lib/feishu.mjs";
 import { assertDevCollection } from "./lib/ids.mjs";
 import { GITHUB_PAGES_ORIGIN, HTTP_ORIGIN } from "./lib/preview.mjs";
+import { loadReleaseMetadata } from "./lib/release-provenance.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
@@ -80,6 +81,7 @@ function makeHandler(host, port, store, deployed) {
       `http://localhost:${port}`,
     ],
     silent: process.env.SILENT === "1",
+    releaseMetadata: loadReleaseMetadata(),
   });
 }
 
