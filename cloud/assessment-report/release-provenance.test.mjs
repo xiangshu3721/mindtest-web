@@ -44,7 +44,7 @@ test("health embeds only allowlisted release identifiers, not input secrets or f
   assert.equal(res.headers["cache-control"], "no-store");
 });
 
-test("no manifest or malformed manifest never claims an audited deployment", () => {
+test("no manifest or malformed manifest never claims an audited deployment", async () => {
   assert.deepEqual(publicReleaseMetadata(null), { status: "UNVERIFIED" });
   assert.deepEqual(publicReleaseMetadata({ ...manifest(), sourceCommit: "bad" }), { status: "UNVERIFIED" });
   assert.deepEqual(publicReleaseMetadata({ ...manifest(), files: [{ path: "../private", sha256: HASH }] }), { status: "UNVERIFIED" });
