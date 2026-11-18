@@ -1,7 +1,8 @@
 import { byteSize, canonical, safeEqual, sha256 } from "./ids.mjs";
-import { MAX_BODY_BYTES, validateSecrets, validateStarResult } from "./validate.mjs";
+import { MAX_BODY_BYTES, validateAssessmentResult, validateSecrets } from "./validate.mjs";
 import { buildGithubShareUrl, indexRow } from "./feishu.mjs";
 import { GITHUB_PAGES_ORIGIN, HTTP_ORIGIN } from "./preview.mjs";
+import { publicReleaseMetadata } from "./release-provenance.mjs";
 
 const DUMMY_HASH = "0".repeat(64);
 
@@ -70,8 +71,8 @@ export function createHandler(options) {
   function log(entry) {
     const safe = {
       svc: "assessmentReportDev",
-      reportId: entry.reportId || "",
-      assessmentId: entry.assessmentId || "",
+      // No reportId, assessmentId, customer ID, token, or result content.
+      // These are sensitive metadata even if they are not a linkSecret.
       status: entry.status,
       ms: entry.ms,
     };
@@ -96,7 +97,7 @@ export function createHandler(options) {
     const result = body && body.result;
     const linkSecret = body && body.linkSecret;
     const ownerToken = body && body.ownerToken;
-    const issues = validateSecrets(linkSecret, ownerToken).concat(validateStarResult(result));
+    const issues = validateSecrets(linkSecret, ownerToken).concat(validateAssessmentResult(result));
     if (issues.length) return finish(422, { error: "invalid", issues });
 
     const submissionId = result.source.clientSubmissionId;
@@ -307,6 +308,7 @@ export function createHandler(options) {
         feishu: feishu.mode,
         store: store.driver,
         deployed: options.deployed === true,
+        release: publicReleaseMetadata(options.releaseMetadata),
       }, { origin });
       log({ status: 200, ms: Date.now() - started });
       return withCors(response, origin, allowedOrigins);
@@ -370,9 +372,7 @@ export function createHandler(options) {
     try {
       const response = await route(body);
       response.origin = origin;
-      const reportId = (body.result && body.result.reportId) || body.reportId || "";
-      const assessmentId = (body.result && body.result.assessmentId) || (response.body && response.body.assessmentId) || "";
-      log({ reportId, assessmentId, status: response.status, ms: Date.now() - started });
+      log({ status: response.status, ms: Date.now() - started });
       return withCors(response, origin, allowedOrigins);
     } catch {
       const response = finish(500, { error: "unavailable" }, { origin });

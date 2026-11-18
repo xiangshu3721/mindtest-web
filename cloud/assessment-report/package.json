@@ -2,7 +2,7 @@
   "name": "assessment-report-dev",
   "private": true,
   "type": "module",
-  "description": "职业六芒星报告的隔离 HTTP 服务。",
+  "description": "职业六芒星、SEFS、SCL-90、PDQ-4、ECR、寻根之旅、爱的 5 种语言、巨婴测评、霍兰德、珍爱金字塔、个人充电、高敏感心力地图和情绪测试报告的隔离 HTTP 服务。",
   "engines": {
     "node": ">=18"
   },
