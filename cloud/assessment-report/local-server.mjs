@@ -181,8 +181,8 @@ export async function startLocalServer({ host = HOST, port = PORT, deployed = pr
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  startLocalServer().catch((error) => {
-    console.error(error && error.message ? error.message : error);
+  startLocalServer().catch(() => {
+    console.error(JSON.stringify({ svc: "assessmentReportDev", status: "startup_failed" }));
     process.exit(1);
   });
 }

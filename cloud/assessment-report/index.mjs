@@ -41,8 +41,8 @@ if (isEntry) {
       host: process.env.HOST || "0.0.0.0",
       port: Number(process.env.PORT || 9000),
     });
-  } catch (error) {
-    console.error(error && error.message ? error.message : error);
+  } catch {
+    console.error(JSON.stringify({ svc: "assessmentReportDev", status: "startup_failed" }));
     process.exit(1);
   }
 }

@@ -61,6 +61,14 @@ export function createSourceManifest() {
   };
 }
 
+export function verifyPreparedManifest(manifest) {
+  const current = createSourceManifest();
+  if (JSON.stringify(manifest) !== JSON.stringify(current)) {
+    throw new Error("Prepared source manifest does not match the current clean checkout.");
+  }
+  return current;
+}
+
 // Do not include the artifact's own digest in the embedded manifest: this
 // would introduce a self-referential hash. Keep the attestation outside it.
 const isEntry = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -78,7 +86,7 @@ if (isEntry) {
     }) + "\n");
   } else if (args.length === 2 && args[0] === "--attest") {
     const artifact = path.resolve(args[1]);
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const manifest = verifyPreparedManifest(JSON.parse(readFileSync(manifestPath, "utf8")));
     // Attestation only after the final package has been prepared, not before.
     if (!manifest.sourceCommit || !manifest.sourceFilesSha256 || !manifest.lockfileSha256) {
       throw new Error("Missing prepared source manifest.");

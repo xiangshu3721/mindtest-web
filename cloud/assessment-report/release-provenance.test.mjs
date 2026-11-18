@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -7,17 +8,19 @@ import { createHandler } from "./lib/handler.mjs";
 import { createMemoryStore } from "./lib/store.mjs";
 import { createFeishuIndex } from "./lib/feishu.mjs";
 import { loadReleaseMetadata, publicReleaseMetadata } from "./lib/release-provenance.mjs";
-import { createSourceManifest } from "./build-release-manifest.mjs";
+import { createSourceManifest, verifyPreparedManifest } from "./build-release-manifest.mjs";
 
 const COMMIT = "a".repeat(40);
 const HASH = "b".repeat(64);
+const file = { path: "lib/handler.mjs", sha256: HASH };
+const sourceFilesSha256 = createHash("sha256").update(JSON.stringify([file])).digest("hex");
 const manifest = () => ({
   schemaVersion: 1,
   sourceCommit: COMMIT,
-  sourceFilesSha256: HASH,
+  sourceFilesSha256,
   lockfileSha256: HASH,
   fileCount: 1,
-  files: [{ path: "lib/handler.mjs", sha256: HASH }],
+  files: [file],
   linkSecret: "NOT_FOR_HEALTH",
   ownerToken: "NOT_FOR_HEALTH_EITHER",
 });
@@ -34,7 +37,7 @@ test("health embeds only allowlisted release identifiers, not input secrets or f
   assert.deepEqual(res.body.release, {
     status: "EMBEDDED_UNATTESTED",
     sourceCommit: COMMIT,
-    sourceFilesSha256: HASH,
+    sourceFilesSha256,
     lockfileSha256: HASH,
     fileCount: 1,
   });
@@ -49,6 +52,8 @@ test("no manifest or malformed manifest never claims an audited deployment", asy
   assert.deepEqual(publicReleaseMetadata({ ...manifest(), sourceCommit: "bad" }), { status: "UNVERIFIED" });
   assert.deepEqual(publicReleaseMetadata({ ...manifest(), files: [{ path: "../private", sha256: HASH }] }), { status: "UNVERIFIED" });
   assert.deepEqual(publicReleaseMetadata({ ...manifest(), fileCount: 2 }), { status: "UNVERIFIED" });
+  assert.deepEqual(publicReleaseMetadata({ ...manifest(), sourceFilesSha256: HASH }), { status: "UNVERIFIED" });
+  assert.deepEqual(publicReleaseMetadata({ ...manifest(), fileCount: 2, files: [file, file] }), { status: "UNVERIFIED" });
   const dir = mkdtempSync(path.join(tmpdir(), "asva-provider-manifest-"));
   try {
     const file = path.join(dir, "manifest.json");
@@ -98,10 +103,20 @@ test("report operations write status and duration only, never identifiers, test 
   assert.ok(handler.logs.every((item) => Object.keys(item).every((key) => ["svc", "status", "ms"].includes(key))));
 });
 
+test("startup failures emit a fixed safe status instead of raw error text", () => {
+  for (const relative of ["index.mjs", "local-server.mjs"]) {
+    const source = readFileSync(new URL(`./${relative}`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /console\.error\(error/);
+    assert.match(source, /status: "startup_failed"/);
+  }
+});
+
 test("source manifest derives a stable tracked-file inventory without reading customer data", () => {
   const first = createSourceManifest();
   const second = createSourceManifest();
   assert.deepEqual(first, second);
+  assert.deepEqual(verifyPreparedManifest(first), first);
+  assert.throws(() => verifyPreparedManifest({ ...first, sourceCommit: COMMIT }), /does not match/);
   assert.match(first.sourceCommit, /^[a-f0-9]{40}$/);
   assert.match(first.sourceFilesSha256, /^[a-f0-9]{64}$/);
   assert.match(first.lockfileSha256, /^[a-f0-9]{64}$/);

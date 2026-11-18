@@ -1,9 +1,15 @@
 // Release metadata is not proof of a deployed version by itself: it must be
 // compared to an independently retrieved remote code inventory and artifact hash.
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const HEX64 = /^[a-f0-9]{64}$/;
 const COMMIT = /^[a-f0-9]{40}$/;
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+
+function canonicalFiles(files) {
+  return files.map(({ path, sha256: fileSha256 }) => ({ path, sha256: fileSha256 }));
+}
 
 export function publicReleaseMetadata(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return { status: "UNVERIFIED" };
@@ -17,6 +23,9 @@ export function publicReleaseMetadata(value) {
         !/^[a-zA-Z0-9_./-]+$/.test(item.path) ||
         item.path.startsWith("/") || item.path.split("/").includes("..") ||
         !HEX64.test(String(item.sha256 || "")))) return { status: "UNVERIFIED" };
+  const files = canonicalFiles(value.files);
+  if (files.some((item, index) => index > 0 && files[index - 1].path >= item.path) ||
+      sha256(JSON.stringify(files)) !== value.sourceFilesSha256) return { status: "UNVERIFIED" };
   // The manifest is embedded in the running package, but is not a cryptographic
   // attestation of the *actual* remote code without independent comparison.
   return {
