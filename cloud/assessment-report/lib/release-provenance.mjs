@@ -30,7 +30,12 @@ export function publicReleaseMetadata(value) {
 
 export function loadReleaseMetadata(file = new URL("../release-manifest.json", import.meta.url)) {
   try {
-    return publicReleaseMetadata(JSON.parse(readFileSync(file, "utf8")));
+    const raw = JSON.parse(readFileSync(file, "utf8"));
+    // Return the validated internal manifest; the HTTP handler will convert it
+    // to a public allowlisted view. Sanitizing here too would drop the file
+    // inventory and make every embedded manifest appear UNVERIFIED.
+    return publicReleaseMetadata(raw).status === "EMBEDDED_UNATTESTED"
+      ? raw : { status: "UNVERIFIED" };
   } catch {
     return { status: "UNVERIFIED" };
   }
